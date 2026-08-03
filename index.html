@@ -842,29 +842,38 @@ window.ALTAR_SETTINGS = {
     return 2 * R * Math.asin(Math.sqrt(h));
   }
 
-  /* Best station that actually reported soil moisture.
-     Not simply the closest: soil at 5,000ft behaves nothing like soil in
-     the valley. Matt's call is to read from the lower stations, so a
-     station above the trail is penalised about three times harder than
-     one below it — a summit sensor never wins on distance alone.
-     Set `station` on a trail to pin one and skip the scoring. */
-  function nearestStation(t, elevMetres) {
+  /* How much closer a station has to be before distance settles it.
+     Inside this margin two stations count as equally near. */
+  var STATION_TIE_MI = 2;
+
+  /* Closest station that actually reported soil moisture. Where two are
+     effectively the same distance away — DuPont sits 16.1 miles from
+     both a valley station and a 5,320ft summit — the lower one wins,
+     rather than whichever happened to come back first.
+     Set `station` on a trail to pin one and skip the choosing. */
+  function nearestStation(t) {
     if (!EXTRA.stations) return null;
-    var trailFt = typeof elevMetres === "number" ? elevMetres * 3.28084 : null;
-    var best = null;
+    var pool = [];
     EXTRA.stations.forEach(function (s) {
       if (s.lat == null || s.lon == null) return;
       if (s.soilmoist == null && s.soilmoist20cm == null) return;
       if (t.station) { if (s.id !== t.station) return; }
       var mi = milesBetween(t.lat, t.lon, s.lat, s.lon);
       if (!t.station && mi > 45) return;
-      var pen = 0;
-      if (trailFt != null && s.elev != null) {
-        var up = s.elev - trailFt;
-        pen = up > 0 ? up / 50 : -up / 150;
-      }
-      var cost = mi + pen;
-      if (!best || cost < best.cost) best = { s: s, mi: mi, cost: cost };
+      pool.push({ s: s, mi: mi });
+    });
+    if (!pool.length) return null;
+
+    var nearest = Infinity;
+    pool.forEach(function (p) { if (p.mi < nearest) nearest = p.mi; });
+
+    var best = null;
+    pool.forEach(function (p) {
+      if (p.mi > nearest + STATION_TIE_MI) return;
+      if (!best) { best = p; return; }
+      var a = p.s.elev == null ? Infinity : p.s.elev;
+      var b = best.s.elev == null ? Infinity : best.s.elev;
+      if (a < b || (a === b && p.mi < best.mi)) best = p;
     });
     return best;
   }
@@ -1009,7 +1018,7 @@ window.ALTAR_SETTINGS = {
       rows += '<li><span class="da-w" style="color:#8C7D70">creek</span><span>' +
         esc(c.meta.name) + " · " + t.gaugeMi + " mi — " + esc(bits.join(", ")) + "</span></li>";
     }
-    var st = nearestStation(t, m && m.elevation);
+    var st = nearestStation(t);
     if (st) {
       var s = st.s, p = [];
       var sm = s.soilmoist20cm != null ? s.soilmoist20cm : s.soilmoist;

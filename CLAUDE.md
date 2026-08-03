@@ -234,47 +234,35 @@ CLOUDS also sends no CORS headers, so a proxy is required regardless.
   `/soil/raw` against the parser before assuming the API broke.
 - Endpoint is `api.climate.ncsu.edu/data.php`; variables are
   `soilmoist`, `soilmoist20cm` (m³/m³) and `soiltemp` (°F).
-**Station matching is elevation-aware, and biased low.** Matt's call
-(3 Aug 2026) is to read from the lower stations everywhere, so a station
-*above* the trail is penalised about three times harder than one below
-it — a summit sensor never wins on distance alone. Elevation comes from
-Open-Meteo for the trail and CLOUDS for the station, both in feet.
-Two reasons elevation matters at all:
+**Station matching: closest wins, ties break downhill.** Matt's call
+(3 Aug 2026). Distance decides it; where two stations are within
+`STATION_TIE_MI` (2 miles) of each other they count as equally near and
+the lower-elevation one takes it. Station elevation comes from CLOUDS,
+in feet. Set `station: "GRGL"` on a trail to pin one and bypass the
+choosing entirely.
 
-1. Without it, DuPont sat exactly 16.1 mi from both FLET (2,067ft,
-   0.44 m³/m³, 88°F) and FRYI (5,320ft, 0.25, 65°F) and picked between
-   wildly different numbers on iteration order alone.
-2. The station reading exists to sanity-check the model's soil moisture
-   *at the same point*. Comparing a 5,320ft station against a score
-   computed at 2,100ft would be apples to oranges.
+The tiebreak exists because DuPont sits 16.1 miles from *both* FLET
+(2,067ft, 0.44 m³/m³) and FRYI (5,320ft, 0.25) — without a rule, which
+of two wildly different numbers it showed came down to iteration order.
+Current picks: Bent Creek, North Mills River, DuPont and Ride Kanuga →
+FLET; Pisgah Proper → FRYI (nothing else within 2 mi of its 8);
+Wilson Creek → MORG; Hatley Pointe → BURN.
 
-Set `station: "FRYI"` on a trail to pin one explicitly and bypass the
-scoring.
+**Caveat on FLET.** Mountain Horticultural Crops Research Station is a
+working agricultural research station and reads much wetter than nearby
+sites (0.44 m³/m³ against 0.25–0.30 at Frying Pan and Green River).
+Some of that is likely irrigation, not weather. Trust its trend more
+than its absolute number. GRGL (Green River Game Land, 2,080ft) is
+unirrigated woodland at effectively the same elevation and loses to
+FLET by half a mile on the southern trails — pinning it on DuPont and
+Ride Kanuga is the fallback if FLET's numbers look wrong in practice.
 
-**This makes the Pisgah pin problem visible rather than hiding it.**
-Because Pisgah Proper is pinned at the ranger station, elevation
-matching sends it to a *valley* station (FLET) rather than Frying Pan
-Mountain. That is faithful to the pin and consistent with the score,
-but the pin is the thing that's wrong — see the known weak point below.
-The station line prints its elevation for exactly this reason: a reader
-can see "2,067 ft" and judge whether it speaks for where they ride.
-Splitting Pisgah into a low and a high entry fixes the pin, the station
-match, and the score in one move. Needs Matt.
-
-**Caveat on FLET, and it now matters more.** Mountain Horticultural
-Crops Research Station is a working agricultural research station and
-reads much wetter than nearby sites (0.44 m³/m³ against 0.25–0.30 at
-Frying Pan and Green River). Some of that is likely irrigation, not
-weather. With the low bias in place **all five NC trails now resolve to
-FLET**, so one possibly-irrigated sensor is speaking for Bent Creek,
-North Mills River, Pisgah, DuPont and Kanuga at once — and every card
-reports the same "~16–20 points wetter than the model" line, which is
-suspicious precisely because it is identical everywhere.
-
-GRGL (Green River Game Land, 2,080ft) is unirrigated woodland at
-effectively the same elevation and loses to FLET by a fraction of a
-mile on the southern trails. Pinning `station: "GRGL"` on DuPont and
-Ride Kanuga would spread the load and probably read truer. Matt's call.
+**Pisgah Proper reads from a 5,320ft summit while the card is pinned at
+the 2,100ft ranger station.** The station is right for the riding and
+wrong for the pin, which is another face of the known weak point below.
+The station line prints its elevation so a reader can judge. Splitting
+Pisgah into a low and a high entry fixes the pin, the station and the
+score together. Needs Matt.
 
 ### Interpreting the numbers
 
