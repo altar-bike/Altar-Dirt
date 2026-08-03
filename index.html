@@ -171,6 +171,7 @@ window.ALTAR_SETTINGS = {
 #dirt-app .da-measured-in li{display:flex;gap:10px;font-size:13.5px;line-height:1.5;color:var(--ash);margin-bottom:6px;}
 #dirt-app .da-measured-in .da-w{min-width:54px;}
 #dirt-app .da-measured-in .da-sub{margin-top:0;}
+#dirt-app .da-meaning{font-size:13.5px;line-height:1.7;color:var(--ash);margin:10px 0 0;}
 
 /* ---------- disclosure ---------- */
 #dirt-app .da-toggle{
@@ -843,10 +844,10 @@ window.ALTAR_SETTINGS = {
 
   /* Best station that actually reported soil moisture.
      Not simply the closest: soil at 5,000ft behaves nothing like soil in
-     the valley, so a station six miles away but three thousand feet below
-     is a worse match than one further off at the right elevation. Roughly
-     1,000ft of difference costs the same as 10 miles. Set `station` on a
-     trail to pin one explicitly and skip the guesswork. */
+     the valley. Matt's call is to read from the lower stations, so a
+     station above the trail is penalised about three times harder than
+     one below it — a summit sensor never wins on distance alone.
+     Set `station` on a trail to pin one and skip the scoring. */
   function nearestStation(t, elevMetres) {
     if (!EXTRA.stations) return null;
     var trailFt = typeof elevMetres === "number" ? elevMetres * 3.28084 : null;
@@ -857,7 +858,12 @@ window.ALTAR_SETTINGS = {
       if (t.station) { if (s.id !== t.station) return; }
       var mi = milesBetween(t.lat, t.lon, s.lat, s.lon);
       if (!t.station && mi > 45) return;
-      var cost = mi + (trailFt != null && s.elev != null ? Math.abs(s.elev - trailFt) / 100 : 0);
+      var pen = 0;
+      if (trailFt != null && s.elev != null) {
+        var up = s.elev - trailFt;
+        pen = up > 0 ? up / 50 : -up / 150;
+      }
+      var cost = mi + pen;
       if (!best || cost < best.cost) best = { s: s, mi: mi, cost: cost };
     });
     return best;
@@ -944,6 +950,52 @@ window.ALTAR_SETTINGS = {
     return c.word;
   }
 
+  /* What the creek number actually tells a rider. Flow relative to the
+     seasonal normal is a read on how full the ground is, which is the
+     part the rain totals alone can't tell you. */
+  function creekMeaning(c) {
+    var s = "";
+    if (c.pct != null) {
+      if (c.pct >= 150)      s = "Creek is well up. The ground is full, and trails will hold water longer than the rain totals suggest.";
+      else if (c.pct >= 115) s = "Running above normal. Low ground and the usual wet spots stay soft.";
+      else if (c.pct >= 85)  s = "About what it runs in " + c.month + ". No signal either way.";
+      else if (c.pct >= 55)  s = "Down on the " + c.month + " normal. The watershed is dry, so trails shed what falls on them.";
+      else                   s = "Well down on normal. Dust before mud.";
+      if (c.trend === "rising") s += " Still climbing, so something upstream is running off.";
+      else if (c.trend === "falling") s += " Dropping back.";
+      return s;
+    }
+    if (c.trend === "rising")  return "Creek is climbing. Something upstream is running off.";
+    if (c.trend === "falling") return "Creek is dropping back.";
+    return "";
+  }
+
+  /* What the station reading means, and — the useful part — where it
+     disagrees with the model. The score wants soil between 0.11 and
+     0.27; the station says what the dirt is actually doing. */
+  function stationMeaning(s, m) {
+    var out = [];
+    var sm = s.soilmoist20cm != null ? s.soilmoist20cm : s.soilmoist;
+    if (sm != null) {
+      if (sm > 0.27)      out.push("Station dirt is wetter than the tacky band.");
+      else if (sm < 0.11) out.push("Station dirt is under the tacky band. Loose over hard.");
+      else                out.push("Station dirt is inside the tacky band, which is the range the score calls good.");
+      if (m && m.smNow != null) {
+        var d = Math.round((sm - m.smNow) * 100);
+        if (Math.abs(d) >= 8) {
+          out.push("That is " + Math.abs(d) + " points " + (d > 0 ? "wetter" : "drier") +
+                   " than the model has this spot.");
+        }
+      }
+    }
+    if (s.soiltemp != null) {
+      if (s.soiltemp <= 32)     out.push("Soil is frozen at the sensor. Firm while it lasts, greasy on the thaw.");
+      else if (s.soiltemp < 40) out.push("Cold soil. Slow to dry.");
+      else if (s.soiltemp >= 75) out.push("Warm soil. Drying fast.");
+    }
+    return out.join(" ");
+  }
+
   /* The measured-data lines that sit under "Why this number". */
   function measuredHtml(t, m) {
     var rows = "";
@@ -972,9 +1024,14 @@ window.ALTAR_SETTINGS = {
       }
     }
     if (!rows) return "";
-    return '<div class="da-measured-in"><p class="da-sub">Measured nearby</p><ul>' + rows +
-      '</ul><p class="da-note">Gauge and station readings are observations, not forecast. ' +
-      'They sit beside the score, they don\'t change it.</p></div>';
+
+    var says = [];
+    if (c) { var cm = creekMeaning(c); if (cm) says.push(cm); }
+    if (st) { var sMsg = stationMeaning(st.s, m); if (sMsg) says.push(sMsg); }
+
+    return '<div class="da-measured-in"><p class="da-sub">Measured nearby</p><ul>' + rows + "</ul>" +
+      (says.length ? '<p class="da-meaning">' + esc(says.join(" ")) + "</p>" : "") +
+      '<p class="da-note">Gauge and station readings are measured, not forecast.</p></div>';
   }
 
   /* Patch the observed data into cards that are already on screen. */
