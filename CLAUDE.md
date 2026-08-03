@@ -29,9 +29,15 @@ Hosted on **GitHub Pages** from this repo. Linked from the Shopify nav at altar.
   Railway service variables).
 - **Railway deploys from a mirror** of the public repo (the Railway GitHub
   app is not installed on the altar-bike org). Pushing to GitHub does NOT
-  auto-redeploy the feedback service — use "Check for updates" on the
-  service's Settings page in Railway. Page-only changes (`index.html`)
-  never need a Railway redeploy.
+  auto-redeploy the feedback service. To ship a server change: Railway →
+  service → **Settings → Upstream Repo → Check for updates**, wait for
+  "New version of the upstream repo available!" to appear (it lags the
+  push by a minute or two and the first click often reports nothing),
+  then **Update → Yes**. Verify with `/health` afterwards. Page-only
+  changes (`index.html`) never need a Railway redeploy.
+  Installing the Railway GitHub app on the altar-bike org would remove
+  this step entirely — worth doing if server changes get frequent.
+  Needs Matt; it's a permission grant on his org.
 - **Weekly calibration check-in** runs as a scheduled Claude task, Mondays
   ~7:23am ET, reading the export CSV and reporting trends to Matt. It only
   recommends multiplier changes past the 30–50-obs-per-class threshold.
@@ -161,9 +167,86 @@ Always show Matt the before/after numbers and the reasoning. He has ground truth
 
 ---
 
+## Data sources
+
+Open-Meteo drives the score. Everything else is **observed** data shown
+next to the score, and deliberately does **not** feed into it.
+
+| Source | Key? | Called from | What it gives |
+|---|---|---|---|
+| Open-Meteo | no | the page | forecast + modelled soil moisture — the score |
+| NWS `api.weather.gov` | no | the page | watches/warnings/advisories per trail |
+| USGS Water Services | no | the page | creek discharge/stage + 7-day trend |
+| NC State CLOUDS | **yes** | Railway `/soil` | measured ECONet soil moisture and temperature |
+
+**Why measured data doesn't change the score.** Creek level and station
+soil moisture are better signals than the model in principle, but
+weighting them is a calibration decision — it needs rider ratings and
+Matt's ground truth, not a guess. Wiring them into the score without
+that would be exactly the mistake the ratings system exists to prevent.
+Revisit once a soil class clears the 30–50 observation threshold.
+
+### NWS alerts
+
+One call for all nine areas, using each trail's `zone` (forecast zone)
+and `czone` (county zone) — flood products often go out by county, so
+both are queried. Zones came from `api.weather.gov/points/<lat>,<lon>`;
+if a trail moves, re-look-up the zone, don't guess it. Events named
+"Test Message" are filtered out.
+
+### USGS creek gauges
+
+`gauge` and `gaugeMi` on each trail; names and normals in `GAUGES`.
+The `med` tables are month-by-month median discharge in cfs, computed
+from USGS published day-of-year medians over each site's period of
+record, and **baked in** so the "% of normal" comparison costs no extra
+request. If you add a gauge, pull its real medians the same way — do
+not estimate them.
+
+- Same-river matches: Pisgah Proper → Davidson River (1.4 mi),
+  North Mills River → Mills River (3.8 mi), Wilson Creek → Wilson Creek
+  at Adako (4.9 mi).
+- **DuPont is a judgment call.** There is no active realtime gauge on
+  the Little River. It currently borrows Davidson River (7.1 mi) as the
+  nearest small mountain stream of similar character; the alternative
+  is French Broad at Blantyre (6.9 mi), a much bigger river that
+  integrates several watersheds. Ask Matt which he'd trust.
+- **Hatley Pointe and Windrock show no creek line at all** — nearest
+  gauges are 14.2 mi and 11.3 mi and not representative. Showing
+  nothing beats showing something misleading. Same rule for new trails.
+- Wilson Creek and Greenbrier report stage only, no discharge, so they
+  show feet and a trend but no comparison to normal.
+
+### CLOUDS / ECONet
+
+`CLOUDS_HASH` lives in the Railway service variables and must never
+appear in `index.html` — the page calls our `/soil` proxy instead.
+CLOUDS also sends no CORS headers, so a proxy is required regardless.
+
+- `GET /soil` — cached 20 min, returns `{stations:[…]}`; the page picks
+  the nearest station within 45 miles that actually reported. Returns
+  an empty list rather than an error when the key is missing or CLOUDS
+  is down, so the page degrades to nothing.
+- `GET /soil/raw?token=…&type=meta` — token-gated view of the raw
+  upstream response, for checking the JSON shape. The parser in
+  `server.js` (`harvest`) is deliberately shape-tolerant because CLOUDS
+  varies its nesting; if station readings stop appearing, compare
+  `/soil/raw` against the parser before assuming the API broke.
+- Endpoint is `api.climate.ncsu.edu/data.php`; variables are
+  `soilmoist`, `soilmoist20cm` (m³/m³) and `soiltemp` (°F).
+- **FRYI (Frying Pan Mountain)** is an ECONet station at elevation right
+  above Pisgah. It is the most promising fix for the known Pisgah Proper
+  problem below — real high-country soil data rather than a valley proxy.
+
 ## Hard constraints
 
 **Never remove the Open-Meteo attribution.** The footer link plus the note that scores are Altar's modification of their data are both required by CC BY 4.0. Non-negotiable.
+
+**Keep the other credits too.** NWS and USGS are US Government works and
+public domain, so their credit is courtesy rather than licence — but NC
+State's ECONet is a university-operated network providing data under an
+account, and crediting the NC State Climate Office is expected. Leave all
+four footer credits in place.
 
 **Never put an API key in `index.html`.** It's client-side; anyone can read it. Open-Meteo's free tier is non-commercial only and a bike shop site is arguably commercial — if Matt moves to their paid plan, the key needs a server-side proxy (a Cloudflare Worker is about fifteen lines). Flag this rather than shipping a key.
 
@@ -205,9 +288,11 @@ After regenerating, verify the file contains **zero** `{{` and no `%}` outside t
 
 ## Ask Matt, don't guess
 
-- The `requestEmail` value
 - Whether Sarah approved the off-palette condition colours
 - Whether Open-Meteo answered on commercial use
+- Which gauge DuPont should borrow (Davidson River vs French Broad)
+- Whether creek level or station soil moisture should start affecting
+  the score — only once there's calibration data to justify it
 - Any soil or exposure correction — he's ridden them, you haven't
 - Anything that spends money or changes a live customer-facing page
 
