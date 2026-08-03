@@ -188,11 +188,19 @@ function harvest(node, ctxId, out) {
   if (id) {
     const rec = () => (out[id] = out[id] || { id: id });
 
+    /* Readings carry their own datetime. CLOUDS returns several hours
+       per station, so keep the freshest rather than trusting key order. */
     for (const v of SOIL_VARS) {
-      if (node[v] !== undefined) {
-        const n = numOf(unwrap(node[v]));
-        if (n !== null) rec()[v] = n;
-      }
+      if (node[v] === undefined) continue;
+      const n = numOf(unwrap(node[v]));
+      if (n === null) continue;
+      const raw = node[v];
+      const when = (raw && typeof raw === "object" && raw.datetime)
+        ? String(raw.datetime) : (unwrap(node.datetime) || null);
+      const r = rec();
+      if (when && r.at && when < r.at) continue;
+      if (when) r.at = when;
+      r[v] = n;
     }
     /* long form: one row per parameter */
     const vn = unwrap(node.var);
@@ -203,6 +211,10 @@ function harvest(node, ctxId, out) {
     const la = numOf(unwrap(node.lat !== undefined ? node.lat : node.latitude));
     const lo = numOf(unwrap(node.lon !== undefined ? node.lon : node.longitude));
     if (la !== null && lo !== null) { rec().lat = la; rec().lon = lo; }
+    /* CLOUDS reports elevation in feet; the page uses it to avoid
+       matching a mountain trail to a valley station. */
+    const el = numOf(unwrap(node.elev !== undefined ? node.elev : node.elevation));
+    if (el !== null) rec().elev = el;
 
     /* Only trust "name" inside a station description, never inside a
        variable object — those carry a name too ("Surface Soil Moisture"). */
@@ -254,6 +266,7 @@ async function soilPayload() {
       name: d.name || m.name || id,
       lat: d.lat != null ? d.lat : (m.lat != null ? m.lat : null),
       lon: d.lon != null ? d.lon : (m.lon != null ? m.lon : null),
+      elev: d.elev != null ? d.elev : (m.elev != null ? m.elev : null),
       soilmoist: d.soilmoist != null ? d.soilmoist : null,
       soilmoist20cm: d.soilmoist20cm != null ? d.soilmoist20cm : null,
       soiltemp: d.soiltemp != null ? d.soiltemp : null,

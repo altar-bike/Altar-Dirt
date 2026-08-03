@@ -841,16 +841,24 @@ window.ALTAR_SETTINGS = {
     return 2 * R * Math.asin(Math.sqrt(h));
   }
 
-  /* Nearest station that actually reported soil moisture, within reach. */
-  function nearestStation(t) {
+  /* Best station that actually reported soil moisture.
+     Not simply the closest: soil at 5,000ft behaves nothing like soil in
+     the valley, so a station six miles away but three thousand feet below
+     is a worse match than one further off at the right elevation. Roughly
+     1,000ft of difference costs the same as 10 miles. Set `station` on a
+     trail to pin one explicitly and skip the guesswork. */
+  function nearestStation(t, elevMetres) {
     if (!EXTRA.stations) return null;
+    var trailFt = typeof elevMetres === "number" ? elevMetres * 3.28084 : null;
     var best = null;
     EXTRA.stations.forEach(function (s) {
       if (s.lat == null || s.lon == null) return;
       if (s.soilmoist == null && s.soilmoist20cm == null) return;
+      if (t.station) { if (s.id !== t.station) return; }
       var mi = milesBetween(t.lat, t.lon, s.lat, s.lon);
-      if (mi > 45) return;
-      if (!best || mi < best.mi) best = { s: s, mi: mi };
+      if (!t.station && mi > 45) return;
+      var cost = mi + (trailFt != null && s.elev != null ? Math.abs(s.elev - trailFt) / 100 : 0);
+      if (!best || cost < best.cost) best = { s: s, mi: mi, cost: cost };
     });
     return best;
   }
@@ -937,7 +945,7 @@ window.ALTAR_SETTINGS = {
   }
 
   /* The measured-data lines that sit under "Why this number". */
-  function measuredHtml(t) {
+  function measuredHtml(t, m) {
     var rows = "";
     var c = creekRead(t);
     if (c) {
@@ -949,7 +957,7 @@ window.ALTAR_SETTINGS = {
       rows += '<li><span class="da-w" style="color:#8C7D70">creek</span><span>' +
         esc(c.meta.name) + " · " + t.gaugeMi + " mi — " + esc(bits.join(", ")) + "</span></li>";
     }
-    var st = nearestStation(t);
+    var st = nearestStation(t, m && m.elevation);
     if (st) {
       var s = st.s, p = [];
       var sm = s.soilmoist20cm != null ? s.soilmoist20cm : s.soilmoist;
@@ -957,8 +965,10 @@ window.ALTAR_SETTINGS = {
       if (sm != null) p.push(r0(sm * 100) + "% water at " + depth);
       if (s.soiltemp != null) p.push(r0(s.soiltemp) + "°F soil");
       if (p.length) {
+        var where = st.mi.toFixed(0) + " mi";
+        if (s.elev != null) where += ", " + r0(s.elev).toLocaleString() + " ft";
         rows += '<li><span class="da-w" style="color:#8C7D70">station</span><span>' +
-          esc(s.name || s.id) + " · " + st.mi.toFixed(0) + " mi — " + esc(p.join(", ")) + "</span></li>";
+          esc(s.name || s.id) + " · " + esc(where) + " — " + esc(p.join(", ")) + "</span></li>";
       }
     }
     if (!rows) return "";
@@ -977,7 +987,7 @@ window.ALTAR_SETTINGS = {
       var f = el.querySelector(".da-creekfact dd");
       if (f) f.textContent = creekFactValue(t);
       var mrow = el.querySelector(".da-measured");
-      if (mrow) mrow.innerHTML = measuredHtml(t);
+      if (mrow) mrow.innerHTML = measuredHtml(t, models[i]);
     });
   }
 
@@ -1041,7 +1051,7 @@ window.ALTAR_SETTINGS = {
       '<button class="da-toggle" type="button">Why this number</button>' +
       '<div class="da-why" hidden><ul>' + drivers + "</ul>" +
         (m.hasSoil ? "" : '<p class="da-note">No soil model available for this point \u2014 score is built from rainfall and drying only.</p>') +
-        '<div class="da-measured">' + measuredHtml(t) + "</div>" +
+        '<div class="da-measured">' + measuredHtml(t, m) + "</div>" +
         outlook +
       "</div>";
 
