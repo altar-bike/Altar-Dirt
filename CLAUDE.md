@@ -14,6 +14,30 @@ A single static HTML page that scores mountain bike trail rideability from weath
 
 Hosted on **GitHub Pages** from this repo. Linked from the Shopify nav at altar.bike.
 
+## Deployed state (as of 2026-08-03)
+
+- **Repo:** `altar-bike/Altar-Dirt` (public — Pages requires it). A `.nojekyll`
+  file at root is required; Jekyll chokes on the Liquid examples in this file.
+- **Live page:** https://altar-bike.github.io/Altar-Dirt/
+- **Feedback service:** `feedback-api/` in this repo, deployed on Railway
+  (project "pleasant-compassion", service "Altar-Dirt") at
+  https://altar-dirt-production.up.railway.app/ — volume at `/data`, env vars
+  `DATA_DIR`, `EXPORT_TOKEN`, `CREW`. See `feedback-api/README.md`. This
+  replaces the old Google Apps Script / Google Sheet route everywhere it's
+  mentioned below; the ratings CSV now comes from the service's
+  `/export.csv?token=…` endpoint (Matt has the token; it's also in the
+  Railway service variables).
+- **Railway deploys from a mirror** of the public repo (the Railway GitHub
+  app is not installed on the altar-bike org). Pushing to GitHub does NOT
+  auto-redeploy the feedback service — use "Check for updates" on the
+  service's Settings page in Railway. Page-only changes (`index.html`)
+  never need a Railway redeploy.
+- **Weekly calibration check-in** runs as a scheduled Claude task, Mondays
+  ~7:23am ET, reading the export CSV and reporting trends to Matt. It only
+  recommends multiplier changes past the 30–50-obs-per-class threshold.
+- The ratings data contains two rows with trail `TEST — delete me`
+  (deploy verification). Always exclude them from analysis.
+
 ---
 
 ## First thing, every session
