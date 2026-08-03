@@ -1,0 +1,13 @@
+{
+  "name": "altar-feedback-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Receives rider ratings from the Altar Cycles trail conditions page",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

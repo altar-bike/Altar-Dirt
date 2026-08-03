@@ -1,0 +1,1157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trail Conditions — Altar Cycles</title>
+<meta name="description" content="What the dirt is doing right now at the trails and bike parks we ride around Asheville. Updated hourly.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@900&family=Lora:ital,wght@0,400;0,600;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<!-- ==================================================================
+     SETTINGS
+     These are the only lines you might want to change. Open this file
+     in TextEdit (Mac) or Notepad (Windows), edit between the quote
+     marks, save. Don't touch anything below this block.
+     ================================================================== -->
+<script>
+window.ALTAR_SETTINGS = {
+
+  // 1. Where "request a riding area" messages get emailed.
+  requestEmail: "matt@altar.bike",
+
+  // 2. Rider ratings. This is the URL of the feedback service on
+  //    Railway (see feedback-api/README.md). While it's empty, the
+  //    rating buttons simply don't appear.
+  feedbackEndpoint: ""
+
+};
+</script>
+
+<!-- ==================================================================
+     ALTAR CYCLES — TRAIL CONDITIONS
+     Self-contained. No build step, no dependencies, no API key.
+     Weather data: Open-Meteo (see LICENSING note in README.md).
+     Edit the TRAILS list in the script block at the bottom.
+     ================================================================== -->
+
+<style>
+/* All selectors scoped to #dirt-app so nothing leaks into the theme. */
+#dirt-app{
+  /* ---- Altar palette ---- */
+  --forge:#111111;      /* Forge Black   — background */
+  --ash:#CCCCCC;        /* Ash White     — body text */
+  --rust:#B85C2A;       /* Altar Rust    — accent */
+  --earth:#4A3728;      /* Trail Earth   — secondary surface */
+  --pisgah:#2C4A5A;     /* Pisgah Shadow — tertiary */
+  /* derived from the palette, not invented grays */
+  --panel:#241B15;      /* Trail Earth, darkened — card fill */
+  --line:#3A2C22;       /* Trail Earth, darkened — hairlines */
+  --muted:#8C7D70;      /* warm muted text */
+
+  background:var(--forge);
+  color:var(--ash);
+  font-family:'Lora',Georgia,serif;
+  font-size:16px;
+  line-height:1.7;
+  padding:32px 20px 56px;
+  box-sizing:border-box;
+}
+#dirt-app *{box-sizing:border-box;}
+#dirt-app a{color:var(--rust);text-decoration:none;border-bottom:1px solid rgba(184,92,42,.4);}
+#dirt-app a:hover{border-bottom-color:var(--rust);}
+#dirt-app button:focus-visible{outline:2px solid var(--rust);outline-offset:3px;}
+
+/* ---------- type ---------- */
+#dirt-app .da-display{
+  font-family:'Big Shoulders Display',Arial,sans-serif;
+  font-weight:900;text-transform:uppercase;margin:0;line-height:.92;
+}
+#dirt-app .da-mono{font-family:'Space Mono',monospace;}
+
+/* ---------- header ---------- */
+#dirt-app .da-head{
+  display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:flex-end;
+  border-bottom:2px solid var(--rust);padding-bottom:16px;margin-bottom:20px;
+}
+#dirt-app .da-head h1{font-size:clamp(38px,7vw,64px);letter-spacing:.01em;}
+#dirt-app .da-head p{margin:8px 0 0;max-width:52ch;font-size:15px;color:var(--muted);}
+#dirt-app .da-refresh{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  background:transparent;color:var(--ash);border:1px solid var(--line);padding:10px 14px;cursor:pointer;
+  transition:border-color .15s,color .15s;
+}
+#dirt-app .da-refresh:hover{border-color:var(--rust);color:var(--rust);}
+#dirt-app .da-refresh[disabled]{opacity:.45;cursor:default;}
+
+/* ---------- verdict ---------- */
+#dirt-app .da-verdict{
+  display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;
+  background:var(--panel);border-left:3px solid var(--rust);
+  padding:14px 18px;margin-bottom:24px;
+}
+#dirt-app .da-verdict .k{
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--muted);
+}
+#dirt-app .da-verdict .n{
+  font-family:'Big Shoulders Display',Arial,sans-serif;font-weight:900;
+  text-transform:uppercase;font-size:26px;line-height:1;
+}
+#dirt-app .da-verdict .s{font-family:'Space Mono',monospace;font-size:12px;color:var(--muted);}
+
+/* ---------- grid + card ---------- */
+#dirt-app .da-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:18px;}
+#dirt-app .da-card{background:var(--panel);border:1px solid var(--line);padding:18px 20px 16px;}
+#dirt-app .da-card h2{font-size:25px;letter-spacing:.015em;}
+#dirt-app .da-place{
+  font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted);margin:5px 0 0;
+}
+
+#dirt-app .da-readout{display:flex;gap:16px;align-items:center;margin:18px 0 10px;}
+#dirt-app .da-score{
+  font-family:'Space Mono',monospace;font-weight:700;font-size:52px;line-height:.85;
+  min-width:82px;font-variant-numeric:tabular-nums;transition:color .15s;
+}
+#dirt-app .da-state{
+  display:inline-block;font-family:'Space Mono',monospace;font-size:11px;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;border:1px solid;padding:4px 8px;
+}
+#dirt-app .da-blurb{margin:8px 0 0;font-size:14px;line-height:1.55;color:var(--ash);}
+#dirt-app .da-window{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--muted);margin:0 0 12px;}
+#dirt-app .da-window b{font-weight:700;}
+
+/* ---------- the day strip ---------- */
+#dirt-app .da-strip{
+  display:flex;gap:2px;align-items:flex-end;height:62px;
+  padding-bottom:6px;border-bottom:1px solid var(--line);
+}
+#dirt-app .da-slot{flex:1;height:100%;display:flex;align-items:flex-end;position:relative;cursor:crosshair;}
+#dirt-app .da-bar{width:100%;transition:opacity .15s;}
+#dirt-app .da-bracket{position:absolute;left:0;right:0;bottom:-6px;height:2px;background:var(--rust);}
+#dirt-app .da-axis{
+  display:flex;justify-content:space-between;font-family:'Space Mono',monospace;
+  font-size:9.5px;letter-spacing:.06em;color:var(--muted);margin:7px 0 14px;
+}
+
+/* ---------- facts ---------- */
+#dirt-app .da-facts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:0 0 12px;}
+#dirt-app .da-facts dt{
+  font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted);
+}
+#dirt-app .da-facts dd{
+  margin:3px 0 0;font-family:'Space Mono',monospace;font-size:13px;
+  color:var(--ash);font-variant-numeric:tabular-nums;
+}
+
+/* ---------- disclosure ---------- */
+#dirt-app .da-toggle{
+  width:100%;text-align:left;background:transparent;border:0;border-top:1px solid var(--line);
+  padding:11px 0 0;color:var(--muted);cursor:pointer;
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+}
+#dirt-app .da-toggle:hover{color:var(--rust);}
+#dirt-app .da-why{padding-top:12px;}
+#dirt-app .da-why ul{list-style:none;margin:0;padding:0;}
+#dirt-app .da-why li{display:flex;gap:10px;font-size:13.5px;line-height:1.5;color:var(--ash);margin-bottom:6px;}
+#dirt-app .da-w{
+  font-family:'Space Mono',monospace;font-size:11.5px;min-width:34px;text-align:right;
+  flex:none;padding-top:2px;font-variant-numeric:tabular-nums;
+}
+#dirt-app .da-outlook{border-top:1px solid var(--line);margin-top:12px;padding-top:11px;}
+#dirt-app .da-orow{
+  display:grid;grid-template-columns:42px 1fr 30px auto;gap:10px;align-items:center;
+  font-family:'Space Mono',monospace;font-size:10.5px;color:var(--muted);margin-bottom:7px;
+}
+#dirt-app .da-obar{height:6px;background:rgba(255,255,255,.07);overflow:hidden;}
+#dirt-app .da-obar i{display:block;height:100%;}
+#dirt-app .da-note{font-size:12.5px;line-height:1.5;color:var(--muted);margin:10px 0 0;font-style:italic;}
+
+/* ---------- states ---------- */
+#dirt-app .da-msg{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--muted);margin:16px 0;}
+#dirt-app .da-err{font-size:13.5px;color:var(--rust);margin:14px 0 0;}
+#dirt-app .da-retry{
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  background:transparent;border:1px solid var(--line);color:var(--ash);padding:7px 11px;
+  margin-top:10px;cursor:pointer;
+}
+#dirt-app .da-retry:hover{border-color:var(--rust);color:var(--rust);}
+
+/* ---------- request a riding area ---------- */
+#dirt-app .da-ask{
+  background:var(--panel);border-left:3px solid var(--rust);
+  padding:22px 24px 24px;margin-top:28px;
+}
+#dirt-app .da-ask h2{font-size:32px;letter-spacing:.015em;}
+#dirt-app .da-ask .lede{margin:8px 0 20px;font-size:15px;color:var(--ash);max-width:56ch;}
+#dirt-app .da-ask-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px;max-width:640px;}
+#dirt-app .da-ask-grid .wide{grid-column:1/-1;}
+#dirt-app .da-ask label{display:block;}
+#dirt-app .da-ask .lab{
+  display:block;font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:6px;
+}
+#dirt-app .da-ask input,#dirt-app .da-ask textarea{
+  width:100%;background:var(--forge);border:1px solid var(--line);color:var(--ash);
+  font-family:'Lora',Georgia,serif;font-size:14.5px;padding:9px 11px;
+}
+#dirt-app .da-ask textarea{resize:vertical;min-height:74px;line-height:1.5;}
+#dirt-app .da-ask input:focus,#dirt-app .da-ask textarea:focus{outline:none;border-color:var(--rust);}
+#dirt-app .da-ask input::placeholder,#dirt-app .da-ask textarea::placeholder{color:#6B5F55;}
+#dirt-app .da-send{
+  margin-top:18px;font-family:'Space Mono',monospace;font-size:11px;font-weight:700;
+  letter-spacing:.16em;text-transform:uppercase;background:var(--rust);color:var(--forge);
+  border:1px solid var(--rust);padding:12px 22px;cursor:pointer;transition:background .15s,color .15s;
+}
+#dirt-app .da-send:hover{background:transparent;color:var(--rust);}
+#dirt-app .da-ask-msg{margin:12px 0 0;font-size:13.5px;line-height:1.5;min-height:1px;}
+#dirt-app .da-ask-msg.err{color:var(--rust);}
+#dirt-app .da-ask-msg.ok{color:#7A8A3E;}
+
+@media (max-width:560px){
+  #dirt-app .da-ask{padding:18px 18px 20px;}
+  #dirt-app .da-ask-grid{grid-template-columns:1fr;}
+}
+
+/* ---------- rider calibration ---------- */
+#dirt-app .da-rate{border-top:1px solid var(--line);margin-top:11px;padding-top:11px;}
+#dirt-app .da-rate-open{
+  background:transparent;border:0;padding:0;cursor:pointer;color:var(--muted);
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+}
+#dirt-app .da-rate-open:hover{color:var(--rust);}
+#dirt-app .da-rate-q{font-size:13.5px;line-height:1.5;margin:0 0 10px;color:var(--ash);}
+#dirt-app .da-sub{
+  font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--muted);margin:12px 0 7px;
+}
+#dirt-app .da-chips{display:flex;flex-wrap:wrap;gap:6px;}
+#dirt-app .da-chip{
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  background:transparent;border:1px solid var(--line);color:var(--ash);
+  padding:8px 11px;cursor:pointer;transition:border-color .12s,background .12s,color .12s;
+}
+#dirt-app .da-chip:hover{border-color:var(--rust);color:var(--rust);}
+#dirt-app .da-chip[aria-pressed="true"]{border-color:var(--rust);background:var(--rust);color:var(--forge);}
+#dirt-app .da-rate input{
+  width:100%;background:var(--forge);border:1px solid var(--line);color:var(--ash);
+  font-family:'Lora',Georgia,serif;font-size:14px;padding:9px 11px;margin-top:12px;
+}
+#dirt-app .da-rate input:focus{outline:none;border-color:var(--rust);}
+#dirt-app .da-rate input::placeholder{color:#6B5F55;}
+#dirt-app .da-rate-send{
+  margin-top:14px;font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;
+  letter-spacing:.16em;text-transform:uppercase;background:var(--rust);color:var(--forge);
+  border:1px solid var(--rust);padding:10px 18px;cursor:pointer;transition:background .15s,color .15s;
+}
+#dirt-app .da-rate-send:hover{background:transparent;color:var(--rust);}
+#dirt-app .da-rate-msg{font-size:12.5px;line-height:1.45;margin:10px 0 0;}
+#dirt-app .da-rate-msg.ok{color:#7A8A3E;}
+#dirt-app .da-rate-msg.err{color:var(--rust);}
+
+/* ---------- footer ---------- */
+#dirt-app .da-foot{margin-top:34px;padding-top:18px;border-top:1px solid var(--line);}
+#dirt-app .da-legend{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:16px;}
+#dirt-app .da-legend span{
+  display:flex;align-items:center;gap:6px;font-family:'Space Mono',monospace;
+  font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);
+}
+#dirt-app .da-legend i{width:10px;height:10px;flex:none;}
+#dirt-app .da-foot p{margin:0 0 10px;font-size:13.5px;line-height:1.65;color:var(--muted);max-width:70ch;}
+
+@media (max-width:560px){
+  #dirt-app{padding:24px 16px 40px;}
+  #dirt-app .da-grid{grid-template-columns:1fr;}
+  #dirt-app .da-score{font-size:44px;min-width:70px;}
+}
+@media (prefers-reduced-motion:reduce){#dirt-app *{transition:none!important;}}
+</style>
+</head>
+<body>
+
+<div id="dirt-app">
+  <header class="da-head">
+    <div>
+      <h1 class="da-display">Trail Conditions</h1>
+      <p>What the dirt is doing right now at the places we ride. Rain in, drying out, scored hour by hour.</p>
+    </div>
+    <button class="da-refresh" id="da-refresh" type="button">Refresh</button>
+  </header>
+
+  <div class="da-verdict" id="da-verdict" hidden></div>
+  <main class="da-grid" id="da-grid"></main>
+
+  <section class="da-ask">
+    <h2 class="da-display">Missing somewhere?</h2>
+    <p class="lede">Tell us where you ride and we'll add it. The nearest town is enough &mdash; coordinates help, and so does anything you know about how the dirt behaves after rain.</p>
+    <form id="da-ask-form" novalidate>
+      <div class="da-ask-grid">
+        <label>
+          <span class="lab">Riding area</span>
+          <input type="text" id="ask-area" name="area" placeholder="Kitsuma, Heartbreak Ridge&hellip;" autocomplete="off">
+        </label>
+        <label>
+          <span class="lab">Nearest town</span>
+          <input type="text" id="ask-town" name="town" placeholder="Old Fort, NC" autocomplete="off">
+        </label>
+        <label class="wide">
+          <span class="lab">What the dirt does &mdash; optional</span>
+          <textarea id="ask-dirt" name="dirt" placeholder="Greasy roots for two days after rain, then it's perfect. North-facing most of the way up."></textarea>
+        </label>
+        <label class="wide">
+          <span class="lab">Your email &mdash; optional, only if you want an answer</span>
+          <input type="email" id="ask-email" name="email" placeholder="you@example.com" autocomplete="email">
+        </label>
+      </div>
+      <button type="submit" class="da-send">Send it</button>
+      <p class="da-ask-msg" id="da-ask-msg" role="status" aria-live="polite"></p>
+    </form>
+  </section>
+
+  <footer class="da-foot">
+    <div class="da-legend" id="da-legend"></div>
+    <p><b>This is a model, not a trail report.</b> Soil moisture and rainfall come from forecast data, not from someone standing on the trail. If a trail is closed, gated, or it rained harder than the model thinks, the model is wrong and your eyes are right. Check the land manager before you drive.</p>
+    <p class="da-mono" style="font-size:11px;letter-spacing:.06em;">
+      Weather data by <a href="https://open-meteo.com/">Open-Meteo.com</a> — CC BY 4.0.
+      Rideability scores are Altar's own model built on top of that data.
+      <span id="da-stamp"></span>
+    </p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ==================================================================
+     1. TRAILS — edit this list. Coordinates from Google Maps
+        (right-click a spot, click the lat/long to copy).
+        soil:     "clay" | "loam" | "rocky" | "sandy"
+        exposure: "shaded" | "mixed" | "exposed"
+     ================================================================== */
+  var TRAILS = [
+    { name: "Bent Creek",       place: "Pisgah NF, NC",         lat: 35.4919, lon: -82.6285, soil: "rocky", exposure: "shaded" },
+    { name: "North Mills River", place: "Trace Ridge, NC",       lat: 35.4204, lon: -82.6567, soil: "rocky", exposure: "mixed"  },
+    { name: "Pisgah Proper",    place: "Davidson River, NC",     lat: 35.2849, lon: -82.7270, soil: "rocky", exposure: "shaded" },
+    { name: "DuPont",           place: "Cedar Mountain, NC",     lat: 35.1990, lon: -82.6180, soil: "rocky", exposure: "mixed"  },
+    { name: "Ride Kanuga",      place: "Hendersonville, NC",     lat: 35.2860, lon: -82.5290, soil: "clay",  exposure: "mixed"  },
+    { name: "Wilson Creek",     place: "Collettsville, NC",      lat: 35.9590, lon: -81.7613, soil: "rocky", exposure: "mixed"  },
+    { name: "Hatley Pointe",    place: "Mars Hill, NC",          lat: 35.9547, lon: -82.5088, soil: "clay",  exposure: "shaded" },
+    { name: "Windrock",         place: "Oliver Springs, TN",     lat: 36.0640, lon: -84.3390, soil: "rocky", exposure: "mixed"  },
+    { name: "Snowshoe",         place: "Snowshoe, WV",           lat: 38.4120, lon: -79.9960, soil: "loam",  exposure: "shaded" }
+  ];
+
+  /* Settings come from the SETTINGS block at the top of this file. */
+  var CFG = window.ALTAR_SETTINGS || {};
+  var REQUEST_EMAIL = CFG.requestEmail || "REPLACE-ME@altar.bike";
+
+  /* ------------------------------------------------------------------
+     Rider calibration. Riders rate the SCORE, not the trail, so every
+     response is a labelled data point against a known model state.
+     endpoint    : Google Apps Script /exec URL. Blank = widget hidden.
+     revealParam : widget only appears if this is in the URL query
+                   (e.g. altar.bike/pages/trail-conditions?crew=1).
+                   Set to "" to show it to everyone.
+     ------------------------------------------------------------------ */
+  var FEEDBACK = {
+    endpoint: CFG.feedbackEndpoint || "",
+    revealParam: CFG.crewParam === undefined ? "crew" : CFG.crewParam
+  };
+
+  var QUEUE_KEY = "altar:dirt:queue";
+  var REPORTER_KEY = "altar:dirt:reporter";
+
+  var CACHE_MINUTES = 30;          /* how long before a visitor triggers a fresh pull */
+  var CACHE_KEY = "altar:dirt:v2";
+
+  /* ==================================================================
+     2. Condition ramp. The olive greens and the bone tone are
+        extensions to the Altar palette — flagged for Sarah's sign-off.
+        Rust, Pisgah Shadow and Ash White are straight from the guide.
+     ================================================================== */
+  var STATES = {
+    frozen: { label: "Frozen firm",  color: "#6E93A6", blurb: "Firm and fast while it lasts. Watch for the thaw." },
+    hero:   { label: "Hero dirt",    color: "#7A8A3E", blurb: "Tacky, grippy, no dust. Go now." },
+    good:   { label: "Good",         color: "#6B7A38", blurb: "Solid traction. Trail can take the traffic." },
+    soft:   { label: "Soft",         color: "#B85C2A", blurb: "Rideable. Expect rut and braking bump." },
+    wet:    { label: "Wet",          color: "#2C4A5A", blurb: "Trail will take damage. Stay off the brakes." },
+    slop:   { label: "Slop",         color: "#7E2E18", blurb: "Riding this tears it up. Pick somewhere else." },
+    dusty:  { label: "Blown out",    color: "#A9998A", blurb: "Loose over hard. Corners will let go." }
+  };
+
+  var SOILS = {
+    clay:  { wet: 1.30, dry: 0.75, name: "clay"  },
+    loam:  { wet: 1.00, dry: 1.00, name: "loam"  },
+    rocky: { wet: 0.55, dry: 1.40, name: "rock"  },
+    sandy: { wet: 0.70, dry: 1.30, name: "sand"  }
+  };
+  var EXPOSURES = {
+    shaded:  { dry: 0.70, name: "shaded" },
+    mixed:   { dry: 1.00, name: "mixed"  },
+    exposed: { dry: 1.35, name: "open"   }
+  };
+
+  /* ============================== helpers ============================== */
+
+  var r0 = function (n) { return Math.round(n); };
+  var clamp = function (n, a, b) { return Math.max(a, Math.min(b, n)); };
+
+  function hourLabel(h) {
+    var ap = h < 12 ? "a" : "p";
+    var hh = h % 12 === 0 ? 12 : h % 12;
+    return hh + ap;
+  }
+  function fmtRange(a, b) { return hourLabel(a) + "\u2013" + hourLabel(Math.min(23, b + 1)); }
+
+  function sumPrecip(arr, end, hours) {
+    var s = 0;
+    for (var i = Math.max(0, end - hours + 1); i <= end; i++) s += arr[i] || 0;
+    return s;
+  }
+  function hoursSinceRain(arr, idx) {
+    for (var i = idx; i >= 0; i--) if ((arr[i] || 0) >= 0.01) return idx - i;
+    return Math.min(idx, 120);
+  }
+  function soilMoisture(h, i) {
+    var a = h.soil_moisture_0_to_1cm ? h.soil_moisture_0_to_1cm[i] : null;
+    var b = h.soil_moisture_3_to_9cm ? h.soil_moisture_3_to_9cm[i] : null;
+    if (a == null && b == null) return null;
+    if (a == null) return b;
+    if (b == null) return a;
+    return a * 0.35 + b * 0.65;
+  }
+  function dryingRate(h, i, mult) {
+    var rad  = (h.shortwave_radiation   && h.shortwave_radiation[i])   || 0;
+    var wind = (h.wind_speed_10m        && h.wind_speed_10m[i])        || 0;
+    var t    = (h.temperature_2m        && h.temperature_2m[i])        || 50;
+    var rh   = (h.relative_humidity_2m  && h.relative_humidity_2m[i]);
+    if (rh == null) rh = 70;
+    var r = 0.2;
+    r += Math.min(0.9, rad / 700);
+    r += Math.min(0.4, wind / 40);
+    r += clamp((t - 45) / 60, -0.3, 0.5);
+    r += clamp((60 - rh) / 70, -0.4, 0.4);
+    return Math.max(0.04, r) * mult;
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  var WMO = {
+    0:"Clear",1:"Mostly clear",2:"Partly cloudy",3:"Overcast",45:"Fog",48:"Freezing fog",
+    51:"Light drizzle",53:"Drizzle",55:"Heavy drizzle",56:"Freezing drizzle",57:"Freezing drizzle",
+    61:"Light rain",63:"Rain",65:"Heavy rain",66:"Freezing rain",67:"Freezing rain",
+    71:"Light snow",73:"Snow",75:"Heavy snow",77:"Snow grains",
+    80:"Showers",81:"Showers",82:"Heavy showers",85:"Snow showers",86:"Snow showers",
+    95:"Thunderstorms",96:"Storms, hail",99:"Storms, hail"
+  };
+
+  /* =========================== the dirt model =========================
+     Soil moisture at 0-1cm and 3-9cm is the backbone. Rainfall,
+     drying energy, and freeze/thaw adjust around it. Soil type and
+     aspect scale how hard wet hurts and how fast it recovers.
+     =================================================================== */
+
+  function buildModel(t, data) {
+    var h = data.hourly, times = h.time;
+    var soilMult = SOILS[t.soil].wet;
+    var dryMult  = SOILS[t.soil].dry * EXPOSURES[t.exposure].dry;
+
+    var nowKey = data.current.time.slice(0, 13), nowIdx = -1;
+    for (var i = 0; i < times.length; i++) if (times[i].slice(0, 13) === nowKey) { nowIdx = i; break; }
+    if (nowIdx < 0) nowIdx = Math.max(0, times.length - 49);
+
+    var rates = [];
+    for (i = 0; i < times.length; i++) rates.push(dryingRate(h, i, dryMult));
+    var hasSoil = false;
+    if (h.soil_moisture_3_to_9cm) {
+      for (i = 0; i < h.soil_moisture_3_to_9cm.length; i++) {
+        if (h.soil_moisture_3_to_9cm[i] != null) { hasSoil = true; break; }
+      }
+    }
+
+    function evaluate(i) {
+      var drivers = [], score = 100, dusty = false, frozen = false, p;
+      var sm = soilMoisture(h, i);
+
+      if (sm != null) {
+        if (sm > 0.27) {
+          p = Math.min(58, (sm - 0.27) * 430 * soilMult);
+          score -= p;
+          drivers.push({ w: "\u2212" + r0(p), t: "subsoil holding " + r0(sm * 100) + "% water by volume" });
+        } else if (sm < 0.11) {
+          p = Math.min(22, (0.11 - sm) * 260);
+          score -= p; dusty = true;
+          drivers.push({ w: "\u2212" + r0(p), t: "subsoil at " + r0(sm * 100) + "% \u2014 dried past tacky" });
+        } else {
+          drivers.push({ w: "ok", t: "subsoil at " + r0(sm * 100) + "% \u2014 inside the tacky band" });
+        }
+      }
+
+      var p24 = sumPrecip(h.precipitation, i, 24);
+      var p72 = sumPrecip(h.precipitation, i, 72);
+      var rainP = Math.min(55, (p24 * 42 + Math.max(0, p72 - p24) * 11) * soilMult);
+      if (rainP > 1) {
+        score -= rainP;
+        drivers.push({ w: "\u2212" + r0(rainP), t: p24.toFixed(2) + '" past 24h, ' + p72.toFixed(2) + '" past 72h' });
+      }
+
+      var pNow = h.precipitation[i] || 0;
+      if (pNow >= 0.02) { score -= 24; drivers.push({ w: "\u221224", t: "rain falling right now" }); }
+      else if (pNow > 0) { score -= 9; drivers.push({ w: "\u22129", t: "trace precipitation" }); }
+
+      var hsr = hoursSinceRain(h.precipitation, i);
+      if (hsr > 0) {
+        var energy = 0;
+        for (var k = i - hsr + 1; k <= i; k++) if (k >= 0) energy += rates[k];
+        var credit = Math.min(32, energy * 1.5);
+        if (credit > 1) {
+          score += credit;
+          var speed = dryMult >= 1.25 ? "fast" : dryMult <= 0.75 ? "slow" : "steady";
+          drivers.push({ w: "+" + r0(credit), t: hsr + "h since rain, " + speed + " drying on this aspect" });
+        }
+      }
+
+      var st = h.soil_temperature_6cm ? h.soil_temperature_6cm[i] : null;
+      if (st != null) {
+        if (st <= 30 && (sm == null || sm > 0.14)) {
+          frozen = true; score = Math.max(score, 86);
+          drivers.push({ w: "+", t: "soil frozen at 6cm (" + r0(st) + "\u00B0F) \u2014 firm underneath" });
+        } else {
+          var wasFrozen = false;
+          for (k = Math.max(0, i - 18); k < i; k++) {
+            var v = h.soil_temperature_6cm[k];
+            if (v != null && v <= 30) wasFrozen = true;
+          }
+          if (wasFrozen && st > 33) {
+            score -= 30;
+            drivers.push({ w: "\u221230", t: "thawing after a freeze \u2014 worst window to ride" });
+          }
+        }
+      }
+
+      var gust = h.wind_gusts_10m ? h.wind_gusts_10m[i] : 0;
+      if (gust > 32) { score -= 8; drivers.push({ w: "\u22128", t: r0(gust) + " mph gusts \u2014 lift holds possible" }); }
+
+      score = clamp(score, 0, 100);
+      var key;
+      if (frozen) key = "frozen";
+      else if (dusty && score >= 58) key = "dusty";
+      else if (score >= 88) key = "hero";
+      else if (score >= 72) key = "good";
+      else if (score >= 56) key = "soft";
+      else if (score >= 36) key = "wet";
+      else key = "slop";
+
+      return {
+        score: score, key: key, drivers: drivers, precip: pNow,
+        temp: h.temperature_2m ? h.temperature_2m[i] : null,
+        pop: h.precipitation_probability ? h.precipitation_probability[i] : null,
+        code: h.weather_code ? h.weather_code[i] : null
+      };
+    }
+
+    var todayDate = data.current.time.slice(0, 10);
+    var dayIdx = data.daily.time.indexOf(todayDate);
+    var sunrise = parseInt((data.daily.sunrise[dayIdx] || "T07").slice(11, 13), 10) || 7;
+    var sunset  = parseInt((data.daily.sunset[dayIdx]  || "T20").slice(11, 13), 10) || 20;
+
+    var dayStart = -1;
+    for (i = 0; i < times.length; i++) if (times[i].indexOf(todayDate) === 0) { dayStart = i; break; }
+
+    var today = [];
+    for (var k2 = 0; k2 < 24; k2++) {
+      var idx = dayStart + k2;
+      if (idx < 0 || idx >= times.length) continue;
+      var ev = evaluate(idx);
+      ev.hour = k2; ev.idx = idx;
+      ev.past = idx < nowIdx;
+      ev.daylight = k2 >= sunrise && k2 <= sunset;
+      today.push(ev);
+    }
+
+    var pool = today.filter(function (x) { return x.idx >= nowIdx && x.daylight; });
+    var best = null, lens = [4, 3, 2];
+    for (var li = 0; li < lens.length; li++) {
+      var len = lens[li];
+      for (var s = 0; s + len <= pool.length; s++) {
+        var slice = pool.slice(s, s + len), contiguous = true;
+        for (var c = 1; c < slice.length; c++) if (slice[c].hour !== slice[c - 1].hour + 1) contiguous = false;
+        if (!contiguous) continue;
+        var mean = slice.reduce(function (a, b) { return a + b.score; }, 0) / len;
+        if (!best || mean > best.mean + 1.5) best = { mean: mean, from: slice[0].hour, to: slice[len - 1].hour };
+      }
+      if (best) break;
+    }
+    if (best && best.mean < 42) best = null;
+
+    var outlook = [];
+    [1, 2].forEach(function (off) {
+      var date = data.daily.time[dayIdx + off];
+      if (!date) return;
+      var st2 = -1;
+      for (var j = 0; j < times.length; j++) if (times[j].indexOf(date) === 0) { st2 = j; break; }
+      if (st2 < 0) return;
+      var hrs = [];
+      for (var q = sunrise; q <= sunset; q++) if (st2 + q < times.length) hrs.push(evaluate(st2 + q));
+      if (!hrs.length) return;
+      var m = hrs.reduce(function (a, b) { return a + b.score; }, 0) / hrs.length;
+      var peak = hrs.reduce(function (a, b) { return b.score > a.score ? b : a; });
+      outlook.push({
+        date: date, mean: m, key: peak.key,
+        precip: data.daily.precipitation_sum ? data.daily.precipitation_sum[dayIdx + off] : 0,
+        hi: data.daily.temperature_2m_max ? data.daily.temperature_2m_max[dayIdx + off] : null
+      });
+    });
+
+    return {
+      now: evaluate(nowIdx), today: today, best: best, outlook: outlook,
+      hasSoil: hasSoil, nowIdx: nowIdx,
+      p24: sumPrecip(h.precipitation, nowIdx, 24),
+      p72: sumPrecip(h.precipitation, nowIdx, 72),
+      hsr: hoursSinceRain(h.precipitation, nowIdx),
+      elevation: data.elevation, current: data.current,
+      /* raw inputs, kept so a rider's rating can be matched to the exact
+         model state that produced the score they were looking at */
+      smNow: soilMoisture(h, nowIdx),
+      soilTempNow: h.soil_temperature_6cm ? h.soil_temperature_6cm[nowIdx] : null,
+      wetMult: soilMult, dryMult: dryMult,
+      localTime: data.current.time
+    };
+  }
+
+  /* ============================== fetching ============================== */
+
+  var HOURLY = [
+    "temperature_2m","relative_humidity_2m","precipitation","precipitation_probability",
+    "weather_code","wind_speed_10m","wind_gusts_10m","shortwave_radiation",
+    "soil_moisture_0_to_1cm","soil_moisture_3_to_9cm","soil_temperature_6cm"
+  ].join(",");
+
+  function url(t) {
+    return "https://api.open-meteo.com/v1/forecast" +
+      "?latitude=" + t.lat + "&longitude=" + t.lon +
+      "&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_gusts_10m" +
+      "&hourly=" + HOURLY +
+      "&daily=sunrise,sunset,precipitation_sum,temperature_2m_max" +
+      "&past_days=3&forecast_days=4" +
+      "&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto";
+  }
+
+  /* Cache is keyed by trail identity, not array position, so adding, removing
+     or reordering trails can never show one trail's data under another's name. */
+  function keyOf(t) { return t.name + "|" + t.lat + "," + t.lon; }
+
+  function readCache() {
+    try {
+      var raw = window.localStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      var c = JSON.parse(raw);
+      if (!c.at || Date.now() - c.at > CACHE_MINUTES * 60000) return null;
+      return c;
+    } catch (e) { return null; }
+  }
+  function writeCache(at, raw) {
+    try { window.localStorage.setItem(CACHE_KEY, JSON.stringify({ at: at, raw: raw })); } catch (e) {}
+  }
+
+  /* =============================== render =============================== */
+
+  var grid = document.getElementById("da-grid");
+  var verdictEl = document.getElementById("da-verdict");
+  var refreshBtn = document.getElementById("da-refresh");
+  var stampEl = document.getElementById("da-stamp");
+  var models = {};
+
+  (function legend() {
+    var order = ["hero","good","soft","wet","slop","dusty","frozen"], out = "";
+    order.forEach(function (k) {
+      out += '<span><i style="background:' + STATES[k].color + '"></i>' + esc(STATES[k].label) + "</span>";
+    });
+    document.getElementById("da-legend").innerHTML = out;
+  })();
+
+  function cardShell(t, i) {
+    var el = document.createElement("article");
+    el.className = "da-card";
+    el.setAttribute("data-i", i);
+    el.innerHTML =
+      '<h2 class="da-display">' + esc(t.name) + "</h2>" +
+      '<p class="da-place">' + esc(t.place) + " &middot; " + SOILS[t.soil].name +
+        " &middot; " + EXPOSURES[t.exposure].name + "</p>" +
+      '<div class="da-body"><p class="da-msg">Reading conditions&hellip;</p></div>';
+    return el;
+  }
+
+  function renderCard(el, t, m) {
+    var body = el.querySelector(".da-body");
+    var s = STATES[m.now.key];
+
+    var strip = "";
+    m.today.forEach(function (h) {
+      var st = STATES[h.key];
+      var op = h.past ? 0.24 : h.daylight ? 1 : 0.42;
+      var ring = h.idx === m.nowIdx ? "outline:1px solid #CCCCCC;" : "";
+      var brk = (m.best && h.hour >= m.best.from && h.hour <= m.best.to)
+        ? '<span class="da-bracket"></span>' : "";
+      strip += '<div class="da-slot" data-h="' + h.hour + '">' +
+        '<span class="da-bar" style="height:' + Math.max(4, h.score) + "%;background:" + st.color +
+        ";opacity:" + op + ";" + ring + '"></span>' + brk + "</div>";
+    });
+
+    var drivers = "";
+    m.now.drivers.forEach(function (d) {
+      var col = d.w.charAt(0) === "\u2212" ? "#B85C2A" : d.w.charAt(0) === "+" ? "#7A8A3E" : "#8C7D70";
+      drivers += '<li><span class="da-w" style="color:' + col + '">' + esc(d.w) + "</span><span>" + esc(d.t) + "</span></li>";
+    });
+
+    var outlook = "";
+    if (m.outlook.length) {
+      outlook = '<div class="da-outlook">';
+      m.outlook.forEach(function (o) {
+        var d = new Date(o.date + "T12:00:00");
+        var day = d.toLocaleDateString(undefined, { weekday: "short" }).toUpperCase();
+        outlook += '<div class="da-orow"><span>' + esc(day) + "</span>" +
+          '<span class="da-obar"><i style="width:' + r0(o.mean) + "%;background:" + STATES[o.key].color + '"></i></span>' +
+          "<span>" + r0(o.mean) + "</span>" +
+          "<span>" + o.precip.toFixed(2) + '" &middot; ' + (o.hi != null ? r0(o.hi) + "\u00B0" : "\u2014") + "</span></div>";
+      });
+      outlook += "</div>";
+    }
+
+    body.innerHTML =
+      '<div class="da-readout">' +
+        '<div class="da-score" style="color:' + s.color + '">' + r0(m.now.score) + "</div>" +
+        "<div>" +
+          '<span class="da-state" style="color:' + s.color + ";border-color:" + s.color + '">' + esc(s.label) + "</span>" +
+          '<p class="da-blurb">' + esc(s.blurb) + "</p>" +
+        "</div>" +
+      "</div>" +
+      '<p class="da-window">' + (m.best
+        ? "Best window today <b>" + fmtRange(m.best.from, m.best.to) + "</b>"
+        : "No good window left today.") + "</p>" +
+      '<div class="da-strip">' + strip + "</div>" +
+      '<div class="da-axis"><span>12a</span><span>6a</span><span>noon</span><span>6p</span><span>11p</span></div>' +
+      '<dl class="da-facts">' +
+        "<div><dt>now</dt><dd>" + r0(m.current.temperature_2m) + "\u00B0 " + esc(WMO[m.current.weather_code] || "") + "</dd></div>" +
+        "<div><dt>24h rain</dt><dd>" + m.p24.toFixed(2) + '"</dd></div>' +
+        "<div><dt>72h rain</dt><dd>" + m.p72.toFixed(2) + '"</dd></div>' +
+        "<div><dt>dry for</dt><dd>" + (m.hsr >= 120 ? "5d+" : m.hsr + "h") + "</dd></div>" +
+      "</dl>" +
+      '<button class="da-toggle" type="button">Why this number</button>' +
+      '<div class="da-why" hidden><ul>' + drivers + "</ul>" +
+        (m.hasSoil ? "" : '<p class="da-note">No soil model available for this point \u2014 score is built from rainfall and drying only.</p>') +
+        outlook +
+      "</div>";
+
+    var toggle = body.querySelector(".da-toggle");
+    var why = body.querySelector(".da-why");
+    toggle.addEventListener("click", function () {
+      var open = !why.hidden;
+      why.hidden = open;
+      toggle.textContent = open ? "Why this number" : "Hide the math";
+    });
+
+    var scoreEl = body.querySelector(".da-score");
+    var stateEl = body.querySelector(".da-state");
+    var blurbEl = body.querySelector(".da-blurb");
+    body.querySelectorAll(".da-slot").forEach(function (slot) {
+      slot.addEventListener("mouseenter", function () {
+        var h = m.today[parseInt(slot.getAttribute("data-h"), 10)];
+        if (!h) return;
+        var hs = STATES[h.key];
+        scoreEl.textContent = r0(h.score);
+        scoreEl.style.color = hs.color;
+        stateEl.textContent = hs.label;
+        stateEl.style.color = hs.color;
+        stateEl.style.borderColor = hs.color;
+        blurbEl.textContent = hourLabel(h.hour) + " \u2014 " + (WMO[h.code] || "\u2014") +
+          ", " + r0(h.temp) + "\u00B0" + (h.pop != null ? ", " + r0(h.pop) + "% chance" : "");
+      });
+      slot.addEventListener("mouseleave", function () {
+        scoreEl.textContent = r0(m.now.score);
+        scoreEl.style.color = s.color;
+        stateEl.textContent = s.label;
+        stateEl.style.color = s.color;
+        stateEl.style.borderColor = s.color;
+        blurbEl.textContent = s.blurb;
+      });
+    });
+
+    attachRating(body, t, m);
+  }
+
+  function renderError(el, t, i, msg) {
+    var body = el.querySelector(".da-body");
+    body.innerHTML = '<p class="da-err">' + esc(msg) + "</p>" +
+      '<button class="da-retry" type="button">Try again</button>';
+    body.querySelector(".da-retry").addEventListener("click", function () {
+      body.innerHTML = '<p class="da-msg">Reading conditions&hellip;</p>';
+      one(t, i, true);
+    });
+  }
+
+  function renderVerdict() {
+    var bestT = null;
+    TRAILS.forEach(function (t, i) {
+      var m = models[i];
+      if (!m) return;
+      if (!bestT || m.now.score > bestT.m.now.score) bestT = { t: t, m: m };
+    });
+    if (!bestT) { verdictEl.hidden = true; return; }
+    var s = STATES[bestT.m.now.key];
+    verdictEl.hidden = false;
+    verdictEl.innerHTML =
+      '<span class="k">Best bet right now</span>' +
+      '<span class="n" style="color:' + s.color + '">' + esc(bestT.t.name) + "</span>" +
+      '<span class="s">' + r0(bestT.m.now.score) + " &middot; " + esc(s.label) +
+      (bestT.m.best ? " &middot; " + fmtRange(bestT.m.best.from, bestT.m.best.to) : "") + "</span>";
+  }
+
+  function stamp(at) {
+    var d = new Date(at);
+    stampEl.textContent = " Updated " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + ".";
+  }
+
+  /* ============================== orchestration ============================== */
+
+  var cards = [];
+  TRAILS.forEach(function (t, i) {
+    var el = cardShell(t, i);
+    grid.appendChild(el);
+    cards.push(el);
+  });
+
+  var rawStore = {};
+
+  function one(t, i, force) {
+    return fetch(url(t), { cache: force ? "reload" : "default" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("Weather service returned " + r.status + ".");
+        return r.json();
+      })
+      .then(function (data) {
+        rawStore[keyOf(t)] = data;
+        models[i] = buildModel(t, data);
+        renderCard(cards[i], t, models[i]);
+        renderVerdict();
+      })
+      .catch(function (e) {
+        renderError(cards[i], t, i, "Couldn't load conditions. " + e.message);
+      });
+  }
+
+  function loadAll(force) {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = "Loading";
+
+    var cached = force ? null : readCache();
+    if (cached && cached.raw) {
+      var usedAll = true;
+      TRAILS.forEach(function (t, i) {
+        var ck = keyOf(t);
+        if (cached.raw[ck]) {
+          try {
+            models[i] = buildModel(t, cached.raw[ck]);
+            rawStore[ck] = cached.raw[ck];
+            renderCard(cards[i], t, models[i]);
+          } catch (e) { usedAll = false; }
+        } else { usedAll = false; }
+      });
+      renderVerdict();
+      stamp(cached.at);
+      if (usedAll) {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = "Refresh";
+        return;
+      }
+    }
+
+    var queue = TRAILS.map(function (t, i) { return { t: t, i: i }; });
+    function worker() {
+      if (!queue.length) return Promise.resolve();
+      var job = queue.shift();
+      return one(job.t, job.i, force).then(function () {
+        return new Promise(function (res) { setTimeout(res, 220); });
+      }).then(worker);
+    }
+
+    Promise.all([worker(), worker()]).then(function () {
+      var at = Date.now();
+      writeCache(at, rawStore);
+      stamp(at);
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = "Refresh";
+    });
+  }
+
+  /* ======================= request a riding area ======================= */
+
+  (function askForm() {
+    var form = document.getElementById("da-ask-form");
+    var msg = document.getElementById("da-ask-msg");
+    if (!form) return;
+
+    function fail(txt, focusId) {
+      msg.className = "da-ask-msg err";
+      msg.textContent = txt;
+      if (focusId) document.getElementById(focusId).focus();
+    }
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+
+      var area  = document.getElementById("ask-area").value.trim();
+      var town  = document.getElementById("ask-town").value.trim();
+      var dirt  = document.getElementById("ask-dirt").value.trim();
+      var email = document.getElementById("ask-email").value.trim();
+
+      if (REQUEST_EMAIL.indexOf("REPLACE") !== -1) {
+        fail("This form isn't wired up yet \u2014 REQUEST_EMAIL still needs setting in the page source.");
+        return;
+      }
+      if (!area) { fail("Which riding area? That one we need.", "ask-area"); return; }
+      if (!town) { fail("Nearest town, so we can put it on a map.", "ask-town"); return; }
+
+      var body =
+        "Riding area: " + area + "\n" +
+        "Nearest town: " + town + "\n" +
+        "Dirt notes: " + (dirt || "\u2014") + "\n" +
+        "Reply to: " + (email || "\u2014") + "\n\n" +
+        "Sent from the trail conditions page.\n";
+
+      msg.className = "da-ask-msg ok";
+      msg.textContent = "Opening your mail app \u2014 hit send and we'll take a look.";
+      window.location.href = "mailto:" + REQUEST_EMAIL +
+        "?subject=" + encodeURIComponent("Trail conditions \u2014 add " + area) +
+        "&body=" + encodeURIComponent(body);
+    });
+  })();
+
+  /* ---- If embedded in an iframe, tell the parent page how tall we are, so
+     the embed can size itself instead of showing an inner scrollbar. ---- */
+  (function reportHeight() {
+    if (window.parent === window) return;
+    var last = 0;
+    function send() {
+      var h = Math.ceil(document.documentElement.scrollHeight);
+      if (h !== last) {
+        last = h;
+        try { window.parent.postMessage({ altarDirtHeight: h }, "*"); } catch (e) {}
+      }
+    }
+    send();
+    window.addEventListener("load", send);
+    window.addEventListener("resize", send);
+    if (window.ResizeObserver) { try { new ResizeObserver(send).observe(document.body); } catch (e) {} }
+    setInterval(send, 1000);
+  })();
+
+  /* ==================== rider calibration ====================
+     Riders rate the score the model showed them, not the trail in the
+     abstract. Each submission carries the exact model inputs behind that
+     score, so the set can be used to refit the soil and aspect multipliers.
+
+     Delivery is fire-and-forget: Apps Script web apps don't return CORS
+     headers, so the browser cannot read the response. Anything that fails
+     or is sent with no signal stays in a local queue and retries later.
+     Confirm delivery in the sheet, not in the browser.
+     ============================================================ */
+
+  var RATED = {};
+
+  function reporter() {
+    try {
+      var r = JSON.parse(window.localStorage.getItem(REPORTER_KEY) || "null");
+      if (r && r.id) return r;
+    } catch (e) {}
+    return null;
+  }
+  function saveReporter(name) {
+    var r = reporter() || { id: Math.random().toString(36).slice(2, 10) + Date.now().toString(36) };
+    r.name = name;
+    try { window.localStorage.setItem(REPORTER_KEY, JSON.stringify(r)); } catch (e) {}
+    return r;
+  }
+  function queueRead() {
+    try { return JSON.parse(window.localStorage.getItem(QUEUE_KEY) || "[]"); } catch (e) { return []; }
+  }
+  function queueWrite(a) {
+    try { window.localStorage.setItem(QUEUE_KEY, JSON.stringify(a.slice(-200))); } catch (e) {}
+  }
+
+  function transmit(payloads) {
+    if (!FEEDBACK.endpoint) return false;
+    var text = JSON.stringify(payloads);
+    try {
+      if (navigator.sendBeacon &&
+          navigator.sendBeacon(FEEDBACK.endpoint, new Blob([text], { type: "text/plain;charset=UTF-8" }))) {
+        return true;
+      }
+    } catch (e) {}
+    try {
+      fetch(FEEDBACK.endpoint, {
+        method: "POST", mode: "no-cors", keepalive: true,
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+        body: text
+      });
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function flushQueue() {
+    var q = queueRead();
+    if (!q.length || !FEEDBACK.endpoint) return;
+    if (navigator.onLine === false) return;
+    if (transmit(q)) queueWrite([]);
+  }
+
+  function snapshot(t, m) {
+    return {
+      trail: t.name, place: t.place, lat: t.lat, lon: t.lon,
+      soil: t.soil, exposure: t.exposure,
+      shown_score: r0(m.now.score), shown_state: m.now.key,
+      soil_moisture: m.smNow == null ? "" : Math.round(m.smNow * 1000) / 1000,
+      soil_temp_f: m.soilTempNow == null ? "" : r0(m.soilTempNow),
+      air_temp_f: m.current.temperature_2m == null ? "" : r0(m.current.temperature_2m),
+      rain_24h: Math.round(m.p24 * 100) / 100,
+      rain_72h: Math.round(m.p72 * 100) / 100,
+      hours_since_rain: m.hsr,
+      wet_mult: m.wetMult, dry_mult: Math.round(m.dryMult * 100) / 100,
+      model_time: m.localTime
+    };
+  }
+
+  /* single-select chip group */
+  function chipGroup(root, sel, onPick) {
+    var g = root.querySelector(sel);
+    if (!g) return;
+    g.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest(".da-chip") : null;
+      if (!b || !g.contains(b)) return;
+      g.querySelectorAll(".da-chip").forEach(function (x) { x.setAttribute("aria-pressed", "false"); });
+      b.setAttribute("aria-pressed", "true");
+      if (onPick) onPick(b);
+    });
+  }
+  function picked(root, sel, attr) {
+    var b = root.querySelector(sel + ' .da-chip[aria-pressed="true"]');
+    return b ? b.getAttribute(attr) : null;
+  }
+
+  function attachRating(body, t, m) {
+    if (!FEEDBACK.endpoint) return;
+    if (FEEDBACK.revealParam &&
+        window.location.search.indexOf(FEEDBACK.revealParam + "=") === -1) return;
+
+    var wrap = document.createElement("div");
+    wrap.className = "da-rate";
+    body.appendChild(wrap);
+
+    var tkey = keyOf(t);
+    if (RATED[tkey]) {
+      wrap.innerHTML = '<p class="da-rate-msg ok">Logged \u2014 thanks.</p>';
+      return;
+    }
+
+    wrap.innerHTML = '<button type="button" class="da-rate-open">Rate this call</button>';
+
+    wrap.querySelector(".da-rate-open").addEventListener("click", function () {
+      var states = ["hero", "good", "soft", "wet", "slop"];
+      var actualChips = states.map(function (k) {
+        return '<button type="button" class="da-chip" data-a="' + k + '">' + esc(STATES[k].label) + "</button>";
+      }).join("");
+      var who = reporter();
+
+      wrap.innerHTML =
+        '<p class="da-rate-q">We said <b>' + r0(m.now.score) + "</b>, " +
+          esc(STATES[m.now.key].label.toLowerCase()) + ". How did it actually ride?</p>" +
+        '<div class="da-chips" data-g="verdict">' +
+          '<button type="button" class="da-chip" data-v="1">Better than that</button>' +
+          '<button type="button" class="da-chip" data-v="0">About right</button>' +
+          '<button type="button" class="da-chip" data-v="-1">Worse than that</button>' +
+        "</div>" +
+        '<div class="da-more" hidden>' +
+          '<p class="da-sub">Closer to \u2014 optional</p>' +
+          '<div class="da-chips" data-g="actual">' + actualChips + "</div>" +
+          '<p class="da-sub">When</p>' +
+          '<div class="da-chips" data-g="when">' +
+            '<button type="button" class="da-chip" data-w="now" aria-pressed="true">Riding now</button>' +
+            '<button type="button" class="da-chip" data-w="earlier">Earlier today</button>' +
+            '<button type="button" class="da-chip" data-w="yesterday">Yesterday</button>' +
+          "</div>" +
+          '<input type="text" class="da-note" maxlength="180" placeholder="Anything worth knowing \u2014 optional">' +
+          (who && who.name ? "" :
+            '<input type="text" class="da-name" maxlength="40" placeholder="Your name \u2014 so we know whose call this is">') +
+          '<button type="button" class="da-rate-send">Send it</button>' +
+          '<p class="da-rate-msg" role="status" aria-live="polite"></p>' +
+        "</div>";
+
+      var more = wrap.querySelector(".da-more");
+      var msg = wrap.querySelector(".da-rate-msg");
+
+      chipGroup(wrap, '[data-g="verdict"]', function () { more.hidden = false; });
+      chipGroup(wrap, '[data-g="actual"]');
+      chipGroup(wrap, '[data-g="when"]');
+
+      wrap.querySelector(".da-rate-send").addEventListener("click", function () {
+        var verdict = picked(wrap, '[data-g="verdict"]', "data-v");
+        if (verdict === null) {
+          msg.className = "da-rate-msg err";
+          msg.textContent = "Pick one of the three first.";
+          return;
+        }
+        var nameEl = wrap.querySelector(".da-name");
+        var who2 = reporter();
+        if (!who2 || !who2.name) {
+          var nm = nameEl ? nameEl.value.trim() : "";
+          if (!nm) {
+            msg.className = "da-rate-msg err";
+            msg.textContent = "Add your name \u2014 an unattributed rating isn't much use.";
+            if (nameEl) nameEl.focus();
+            return;
+          }
+          who2 = saveReporter(nm);
+        }
+
+        var payload = snapshot(t, m);
+        payload.v = 2;
+        payload.sent_at = new Date().toISOString();
+        payload.reporter_id = who2.id;
+        payload.reporter_name = who2.name;
+        payload.verdict = parseInt(verdict, 10);
+        payload.actual = picked(wrap, '[data-g="actual"]', "data-a") || "";
+        payload.when = picked(wrap, '[data-g="when"]', "data-w") || "now";
+        payload.note = wrap.querySelector(".da-note").value.trim();
+        payload.tz_offset_min = new Date().getTimezoneOffset();
+
+        var q = queueRead();
+        q.push(payload);
+        queueWrite(q);
+        RATED[tkey] = true;
+
+        if (transmit(q)) {
+          queueWrite([]);
+          wrap.innerHTML = '<p class="da-rate-msg ok">Logged \u2014 thanks. That one actually helps.</p>';
+        } else {
+          wrap.innerHTML = '<p class="da-rate-msg ok">Saved. It\'ll send once you\'re back on signal.</p>';
+        }
+      });
+    });
+  }
+
+  window.addEventListener("online", flushQueue);
+  flushQueue();
+
+  refreshBtn.addEventListener("click", function () { loadAll(true); });
+  loadAll(false);
+})();
+</script>
+
+</body>
+</html>
