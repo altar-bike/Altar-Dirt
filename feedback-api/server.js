@@ -166,37 +166,56 @@ function numOf(v) {
 
 const isId = (k) => /^[A-Z0-9]{3,6}$/.test(k);
 
-/* CLOUDS can return wide or long form and nests by location or by
-   datetime depending on arguments, so walk the tree rather than
-   assuming one shape. */
+/* CLOUDS wraps every field as { name: "<human label>", value: <actual> },
+   so almost nothing is a bare scalar. Unwrap before reading anything. */
+function unwrap(v) {
+  if (v && typeof v === "object" && !Array.isArray(v) && "value" in v) return v.value;
+  return v;
+}
+
+/* Shape is metadata.location.<ID>.{lat,lon,name,…} for station details
+   and data.<ID>.<datetime>.<var> for readings, but the nesting shifts
+   with the order/type arguments — so walk the tree and key off station
+   ids wherever they turn up rather than hard-coding a path. */
 function harvest(node, ctxId, out) {
   if (!node || typeof node !== "object") return;
   if (Array.isArray(node)) { node.forEach((n) => harvest(n, ctxId, out)); return; }
 
-  const id = node.location || node.loc || node.station || node.station_id || ctxId;
-  const rec = () => (out[id] = out[id] || { id });
+  let id = ctxId;
+  const locv = unwrap(node.location !== undefined ? node.location : node.station);
+  if (typeof locv === "string" && isId(locv)) id = locv;
 
   if (id) {
+    const rec = () => (out[id] = out[id] || { id: id });
+
     for (const v of SOIL_VARS) {
       if (node[v] !== undefined) {
-        const n = numOf(node[v]);
+        const n = numOf(unwrap(node[v]));
         if (n !== null) rec()[v] = n;
       }
     }
     /* long form: one row per parameter */
-    if (node.var && SOIL_VARS.indexOf(node.var) !== -1 && node.value !== undefined) {
+    const vn = unwrap(node.var);
+    if (typeof vn === "string" && SOIL_VARS.indexOf(vn) !== -1 && node.value !== undefined) {
       const n = numOf(node.value);
-      if (n !== null) rec()[node.var] = n;
+      if (n !== null) rec()[vn] = n;
     }
-    if (node.datetime && out[id]) out[id].at = node.datetime;
-    /* metadata fields, when present */
-    const la = numOf(node.latitude !== undefined ? node.latitude : node.lat);
-    const lo = numOf(node.longitude !== undefined ? node.longitude : node.lon);
+    const la = numOf(unwrap(node.lat !== undefined ? node.lat : node.latitude));
+    const lo = numOf(unwrap(node.lon !== undefined ? node.lon : node.longitude));
     if (la !== null && lo !== null) { rec().lat = la; rec().lon = lo; }
-    if (node.name && typeof node.name === "string") rec().name = node.name.slice(0, 60);
+
+    /* Only trust "name" inside a station description, never inside a
+       variable object — those carry a name too ("Surface Soil Moisture"). */
+    const nm = unwrap(node.name);
+    if (typeof nm === "string" && (node.location !== undefined || node.city !== undefined)) {
+      rec().name = nm.slice(0, 60);
+    }
+    const dt = unwrap(node.datetime);
+    if (typeof dt === "string" && out[id]) out[id].at = dt;
   }
 
   for (const [k, v] of Object.entries(node)) {
+    if (SOIL_VARS.indexOf(k) !== -1) continue;   /* already read; don't recurse in */
     if (v && typeof v === "object") harvest(v, isId(k) ? k : id, out);
   }
 }
@@ -313,9 +332,15 @@ const server = http.createServer(function (req, res) {
     const which = url.searchParams.get("type") === "meta"
       ? { type: "meta", var: SOIL_VARS.join(",") }
       : { var: SOIL_VARS.join(","), data_limit: "last" };
+    /* narrow the response while debugging: ?loc=FLET&metadata=no&section=data */
+    ["loc", "metadata", "start", "end", "int", "obtype"].forEach(function (k) {
+      const v = url.searchParams.get(k);
+      if (v) which[k] = v;
+    });
+    const section = url.searchParams.get("section");
     (CLOUDS_HASH ? cloudsJson(cloudsUrl(which)) : Promise.reject(new Error("CLOUDS_HASH not set")))
       .then(function (j) {
-        let s = JSON.stringify(j).slice(0, 20000);
+        let s = JSON.stringify(section && j[section] !== undefined ? j[section] : j).slice(0, 20000);
         if (CLOUDS_HASH) s = s.split(CLOUDS_HASH).join("[redacted]");
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(s);
