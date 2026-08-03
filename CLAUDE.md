@@ -234,9 +234,39 @@ CLOUDS also sends no CORS headers, so a proxy is required regardless.
   `/soil/raw` against the parser before assuming the API broke.
 - Endpoint is `api.climate.ncsu.edu/data.php`; variables are
   `soilmoist`, `soilmoist20cm` (m³/m³) and `soiltemp` (°F).
-- **FRYI (Frying Pan Mountain)** is an ECONet station at elevation right
-  above Pisgah. It is the most promising fix for the known Pisgah Proper
-  problem below — real high-country soil data rather than a valley proxy.
+**Station matching is elevation-aware, not just nearest.** Soil at
+5,000ft behaves nothing like soil in the valley, so the page costs
+1,000ft of elevation difference about the same as 10 miles, using the
+trail elevation Open-Meteo returns and the station elevation CLOUDS
+reports in feet. Two reasons this is right:
+
+1. Without it, DuPont sat exactly 16.1 mi from both FLET (2,067ft,
+   0.44 m³/m³, 88°F) and FRYI (5,320ft, 0.25, 65°F) and picked between
+   wildly different numbers on iteration order alone.
+2. The station reading exists to sanity-check the model's soil moisture
+   *at the same point*. Comparing a 5,320ft station against a score
+   computed at 2,100ft would be apples to oranges.
+
+Set `station: "FRYI"` on a trail to pin one explicitly and bypass the
+scoring.
+
+**This makes the Pisgah pin problem visible rather than hiding it.**
+Because Pisgah Proper is pinned at the ranger station, elevation
+matching sends it to a *valley* station (FLET) rather than Frying Pan
+Mountain. That is faithful to the pin and consistent with the score,
+but the pin is the thing that's wrong — see the known weak point below.
+The station line prints its elevation for exactly this reason: a reader
+can see "2,067 ft" and judge whether it speaks for where they ride.
+Splitting Pisgah into a low and a high entry fixes the pin, the station
+match, and the score in one move. Needs Matt.
+
+**Caveat on FLET.** Mountain Horticultural Crops Research Station is a
+working agricultural research station and reads much wetter than nearby
+sites (0.44 m³/m³ against 0.25–0.30 at Frying Pan and Green River).
+Some of that is likely irrigation, not weather. Treat its absolute
+moisture with suspicion; its *trend* is still useful. GRGL (Green River
+Game Land, 2,080ft) is unirrigated woodland at a similar elevation and
+may be the better valley reference — worth asking Matt.
 
 ## Hard constraints
 
