@@ -24,7 +24,12 @@ window.ALTAR_SETTINGS = {
   // 2. Rider ratings. This is the URL of the feedback service on
   //    Railway (see feedback-api/README.md). While it's empty, the
   //    rating buttons simply don't appear.
-  feedbackEndpoint: "https://altar-dirt-production.up.railway.app/"
+  feedbackEndpoint: "https://altar-dirt-production.up.railway.app/",
+
+  // 3. Who sees the rating buttons. "" = everyone. Set to "crew" to
+  //    hide them unless the URL has ?crew=1 (ratings from names not on
+  //    the CREW list are excluded from calibration either way).
+  crewParam: ""
 
 };
 </script>
@@ -365,7 +370,7 @@ window.ALTAR_SETTINGS = {
   var REPORTER_KEY = "altar:dirt:reporter";
 
   var CACHE_MINUTES = 30;          /* how long before a visitor triggers a fresh pull */
-  var CACHE_KEY = "altar:dirt:v2";
+  var CACHE_KEY = "altar:dirt:v3";   /* bumped: 5-day outlook needs a fresh pull */
 
   /* ==================================================================
      2. Condition ramp. The olive greens and the bone tone are
@@ -591,7 +596,7 @@ window.ALTAR_SETTINGS = {
     if (best && best.mean < 42) best = null;
 
     var outlook = [];
-    [1, 2].forEach(function (off) {
+    [1, 2, 3, 4, 5].forEach(function (off) {
       var date = data.daily.time[dayIdx + off];
       if (!date) return;
       var st2 = -1;
@@ -639,7 +644,7 @@ window.ALTAR_SETTINGS = {
       "&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_gusts_10m" +
       "&hourly=" + HOURLY +
       "&daily=sunrise,sunset,precipitation_sum,temperature_2m_max" +
-      "&past_days=3&forecast_days=4" +
+      "&past_days=3&forecast_days=6" +
       "&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto";
   }
 
