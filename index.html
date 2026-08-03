@@ -29,7 +29,13 @@ window.ALTAR_SETTINGS = {
   // 3. Who sees the rating buttons. "" = everyone. Set to "crew" to
   //    hide them unless the URL has ?crew=1 (ratings from names not on
   //    the CREW list are excluded from calibration either way).
-  crewParam: ""
+  crewParam: "",
+
+  // 4. Measured soil data from NC State's ECONet, via our own service
+  //    (the CLOUDS key has to stay server-side, so this points at the
+  //    Railway proxy, never at api.climate.ncsu.edu directly). Leave
+  //    blank to turn the station readings off.
+  soilStationEndpoint: "https://altar-dirt-production.up.railway.app/soil"
 
 };
 </script>
@@ -142,7 +148,7 @@ window.ALTAR_SETTINGS = {
 }
 
 /* ---------- facts ---------- */
-#dirt-app .da-facts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:0 0 12px;}
+#dirt-app .da-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(56px,1fr));gap:10px;margin:0 0 12px;}
 #dirt-app .da-facts dt{
   font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.14em;
   text-transform:uppercase;color:var(--muted);
@@ -151,6 +157,20 @@ window.ALTAR_SETTINGS = {
   margin:3px 0 0;font-family:'Space Mono',monospace;font-size:13px;
   color:var(--ash);font-variant-numeric:tabular-nums;
 }
+
+/* ---------- observed data: alerts, gauges, stations ---------- */
+#dirt-app .da-alertbox:empty,#dirt-app .da-measured:empty{display:none;}
+#dirt-app .da-alert{
+  font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--rust);border:1px solid var(--rust);border-left-width:3px;
+  padding:7px 10px;margin:0 0 9px;line-height:1.45;
+}
+#dirt-app .da-alert b{font-weight:700;}
+#dirt-app .da-measured-in{border-top:1px solid var(--line);margin-top:12px;padding-top:11px;}
+#dirt-app .da-measured-in ul{list-style:none;margin:0;padding:0;}
+#dirt-app .da-measured-in li{display:flex;gap:10px;font-size:13.5px;line-height:1.5;color:var(--ash);margin-bottom:6px;}
+#dirt-app .da-measured-in .da-w{min-width:54px;}
+#dirt-app .da-measured-in .da-sub{margin-top:0;}
 
 /* ---------- disclosure ---------- */
 #dirt-app .da-toggle{
@@ -322,6 +342,10 @@ window.ALTAR_SETTINGS = {
     <p class="da-mono" style="font-size:11px;letter-spacing:.06em;">
       Weather data by <a href="https://open-meteo.com/">Open-Meteo.com</a> — CC BY 4.0.
       Rideability scores are Altar's own model built on top of that data.
+      Watches and warnings from the <a href="https://www.weather.gov/">National Weather Service</a>.
+      Creek levels from <a href="https://waterdata.usgs.gov/">USGS Water Data</a>.
+      Station soil readings from the <a href="https://econet.climate.ncsu.edu/">NC ECONet</a>,
+      NC State Climate Office.
       <span id="da-stamp"></span>
     </p>
   </footer>
@@ -337,17 +361,56 @@ window.ALTAR_SETTINGS = {
         soil:     "clay" | "loam" | "rocky" | "sandy"
         exposure: "shaded" | "mixed" | "exposed"
      ================================================================== */
+  /* zone  : NWS forecast zone, used to pull weather alerts (one call for all
+              trails). Looked up from api.weather.gov/points/<lat>,<lon>.
+     czone : NWS county zone. Flood products are often issued by county
+             rather than forecast zone, so both are queried.
+     gauge : USGS stream gauge site number, or null when nothing close
+             enough is representative. gaugeMi is its distance in miles.
+             Gauges were chosen from active USGS sites with realtime data;
+             see the GAUGES table below for names and normals. */
   var TRAILS = [
-    { name: "Bent Creek",       place: "Pisgah NF, NC",         lat: 35.4919, lon: -82.6285, soil: "rocky", exposure: "shaded" },
-    { name: "North Mills River", place: "Trace Ridge, NC",       lat: 35.4204, lon: -82.6567, soil: "rocky", exposure: "mixed"  },
-    { name: "Pisgah Proper",    place: "Davidson River, NC",     lat: 35.2849, lon: -82.7270, soil: "rocky", exposure: "shaded" },
-    { name: "DuPont",           place: "Cedar Mountain, NC",     lat: 35.1990, lon: -82.6180, soil: "rocky", exposure: "mixed"  },
-    { name: "Ride Kanuga",      place: "Hendersonville, NC",     lat: 35.2860, lon: -82.5290, soil: "clay",  exposure: "mixed"  },
-    { name: "Wilson Creek",     place: "Collettsville, NC",      lat: 35.9590, lon: -81.7613, soil: "rocky", exposure: "mixed"  },
-    { name: "Hatley Pointe",    place: "Mars Hill, NC",          lat: 35.9547, lon: -82.5088, soil: "clay",  exposure: "shaded" },
-    { name: "Windrock",         place: "Oliver Springs, TN",     lat: 36.0640, lon: -84.3390, soil: "rocky", exposure: "mixed"  },
-    { name: "Snowshoe",         place: "Snowshoe, WV",           lat: 38.4120, lon: -79.9960, soil: "loam",  exposure: "shaded" }
+    { name: "Bent Creek",       place: "Pisgah NF, NC",         lat: 35.4919, lon: -82.6285, soil: "rocky", exposure: "shaded",
+      zone: "NCZ053", czone: "NCC021", gauge: "0344878100", gaugeMi: 5.1 },
+    { name: "North Mills River", place: "Trace Ridge, NC",       lat: 35.4204, lon: -82.6567, soil: "rocky", exposure: "mixed",
+      zone: "NCZ065", czone: "NCC089", gauge: "03446000",   gaugeMi: 3.8 },
+    { name: "Pisgah Proper",    place: "Davidson River, NC",     lat: 35.2849, lon: -82.7270, soil: "rocky", exposure: "shaded",
+      zone: "NCZ064", czone: "NCC175", gauge: "03441000",   gaugeMi: 1.4 },
+    { name: "DuPont",           place: "Cedar Mountain, NC",     lat: 35.1990, lon: -82.6180, soil: "rocky", exposure: "mixed",
+      zone: "NCZ064", czone: "NCC175", gauge: "03441000",   gaugeMi: 7.1 },
+    { name: "Ride Kanuga",      place: "Hendersonville, NC",     lat: 35.2860, lon: -82.5290, soil: "clay",  exposure: "mixed",
+      zone: "NCZ065", czone: "NCC089", gauge: "0344632850", gaugeMi: 5.0 },
+    { name: "Wilson Creek",     place: "Collettsville, NC",      lat: 35.9590, lon: -81.7613, soil: "rocky", exposure: "mixed",
+      zone: "NCZ501", czone: "NCC027", gauge: "02140510",   gaugeMi: 4.9 },
+    { name: "Hatley Pointe",    place: "Mars Hill, NC",          lat: 35.9547, lon: -82.5088, soil: "clay",  exposure: "shaded",
+      zone: "NCZ048", czone: "NCC115", gauge: null,         gaugeMi: 0   },
+    { name: "Windrock",         place: "Oliver Springs, TN",     lat: 36.0640, lon: -84.3390, soil: "rocky", exposure: "mixed",
+      zone: "TNZ036", czone: "TNC001", gauge: null,         gaugeMi: 0   },
+    { name: "Snowshoe",         place: "Snowshoe, WV",           lat: 38.4120, lon: -79.9960, soil: "loam",  exposure: "shaded",
+      zone: "WVZ523", czone: "WVC075", gauge: "03180900",   gaugeMi: 5.7 }
   ];
+
+  /* ==================================================================
+     Stream gauges. Creek level is a direct read on how soaked a
+     watershed is — and unlike the soil model, it is measured, not
+     forecast. "med" is the median discharge in cubic feet per second
+     for each month, computed from USGS published day-of-year medians
+     over each site's full period of record. Sites that only report
+     stage (gauge height) have no med table; those show level and
+     trend but no comparison to normal.
+     ================================================================== */
+  var GAUGES = {
+    "0344878100": { name: "Hominy Creek nr West Asheville", por: "2020–2025",
+      med: {1:142,2:162,3:175,4:144.5,5:129,6:100.5,7:92,8:89,9:66.5,10:71,11:79.5,12:99} },
+    "03446000":   { name: "Mills River nr Mills River",     por: "1925–2026",
+      med: {1:166,2:177,3:194,4:193,5:160,6:125.5,7:100,8:90,9:80,10:85,11:100.5,12:134} },
+    "03441000":   { name: "Davidson River nr Brevard",      por: "1921–2026",
+      med: {1:127,2:136,3:143,4:141.5,5:115,6:92,7:73,8:69,9:60,10:59,11:77,12:104} },
+    "0344632850": { name: "Mud Creek nr Balfour",           por: "2020–2026",
+      med: {1:110,2:113,3:116,4:104,5:90,6:68,7:62,8:65,9:46,10:56,11:68,12:84} },
+    "02140510":   { name: "Wilson Creek at Adako",          por: "", med: null },
+    "03180900":   { name: "Greenbrier River at Clover Lick", por: "", med: null }
+  };
 
   /* Settings come from the SETTINGS block at the top of this file. */
   var CFG = window.ALTAR_SETTINGS || {};
@@ -665,6 +728,133 @@ window.ALTAR_SETTINGS = {
     try { window.localStorage.setItem(CACHE_KEY, JSON.stringify({ at: at, raw: raw })); } catch (e) {}
   }
 
+  /* ================== measured data, layered on top ==================
+     Three sources that are observed rather than modelled. Every one of
+     them is optional: if a request fails the page carries on with the
+     Open-Meteo score exactly as before. None of them change the score —
+     they sit alongside it so a rider can see where the model and the
+     real world disagree. Folding creek level or station soil moisture
+     into the score is a calibration decision, and that needs Matt's
+     ground truth plus enough rider ratings to justify it.
+     =================================================================== */
+
+  var EXTRA = { alerts: {}, creeks: {}, stations: null };
+
+  /* --- NWS watches, warnings and advisories. One call, all trails. --- */
+  function loadAlerts() {
+    var zones = [];
+    TRAILS.forEach(function (t) {
+      if (t.zone && zones.indexOf(t.zone) === -1) zones.push(t.zone);
+      if (t.czone && zones.indexOf(t.czone) === -1) zones.push(t.czone);
+    });
+    if (!zones.length) return Promise.resolve();
+    return fetch("https://api.weather.gov/alerts/active?zone=" + zones.join(","))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.features) return;
+        var by = {};
+        j.features.forEach(function (f) {
+          var p = f.properties || {};
+          if (!p.event || /test message/i.test(p.event)) return;
+          var ugc = (p.geocode && p.geocode.UGC) || [];
+          ugc.forEach(function (z) {
+            (by[z] = by[z] || []).push({
+              event: p.event, severity: p.severity,
+              ends: p.ends || p.expires || null
+            });
+          });
+        });
+        EXTRA.alerts = by;
+      })
+      .catch(function () {});
+  }
+
+  /* --- USGS creek levels. Two calls: current values, then daily means
+         for the trend. Sites are batched into one request each. --- */
+  function loadCreeks() {
+    var ids = [];
+    TRAILS.forEach(function (t) { if (t.gauge && ids.indexOf(t.gauge) === -1) ids.push(t.gauge); });
+    if (!ids.length) return Promise.resolve();
+    var base = "https://waterservices.usgs.gov/nwis/", sites = ids.join(",");
+    var got = {};
+
+    function series(j) {
+      return (j && j.value && j.value.timeSeries) || [];
+    }
+
+    return fetch(base + "iv/?format=json&sites=" + sites + "&parameterCd=00060,00065&siteStatus=active")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        series(j).forEach(function (ts) {
+          var id = ts.sourceInfo.siteCode[0].value;
+          var code = ts.variable.variableCode[0].value;
+          var v = ts.values[0] && ts.values[0].value[0];
+          if (!v || v.value === "" || +v.value <= -999) return;
+          var g = got[id] = got[id] || { id: id };
+          if (code === "00060") g.cfs = +v.value;
+          if (code === "00065") g.ft = +v.value;
+          g.at = v.dateTime;
+        });
+        return fetch(base + "dv/?format=json&sites=" + sites + "&parameterCd=00060,00065&period=P7D&statCd=00003");
+      })
+      .then(function (r) { return r && r.ok ? r.json() : null; })
+      .then(function (j) {
+        series(j).forEach(function (ts) {
+          var id = ts.sourceInfo.siteCode[0].value;
+          var code = ts.variable.variableCode[0].value;
+          var g = got[id];
+          if (!g) return;
+          var vals = ((ts.values[0] && ts.values[0].value) || [])
+            .map(function (x) { return +x.value; })
+            .filter(function (n) { return !isNaN(n) && n > -999; });
+          if (vals.length < 2) return;
+          /* prefer discharge for the trend; fall back to stage */
+          if (code === "00060" || (code === "00065" && g.cfs == null)) {
+            var last = vals[vals.length - 1], prev = vals[vals.length - 2];
+            var ch = prev ? (last - prev) / prev : 0;
+            g.trend = ch > 0.12 ? "rising" : ch < -0.12 ? "falling" : "steady";
+          }
+        });
+      })
+      .catch(function () {})
+      .then(function () { EXTRA.creeks = got; });
+  }
+
+  /* --- Measured soil moisture from NC State ECONet stations, through
+         our own proxy so the CLOUDS key never reaches the browser. --- */
+  function loadStations() {
+    var ep = CFG.soilStationEndpoint || "";
+    if (!ep) return Promise.resolve();
+    return fetch(ep)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (j && j.stations && j.stations.length) EXTRA.stations = j.stations;
+      })
+      .catch(function () {});
+  }
+
+  function milesBetween(a, b, c, d) {
+    var R = 3959, rad = function (x) { return x * Math.PI / 180; };
+    var dLa = rad(c - a), dLo = rad(d - b);
+    var h = Math.sin(dLa / 2) * Math.sin(dLa / 2) +
+            Math.cos(rad(a)) * Math.cos(rad(c)) * Math.sin(dLo / 2) * Math.sin(dLo / 2);
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  /* Nearest station that actually reported soil moisture, within reach. */
+  function nearestStation(t) {
+    if (!EXTRA.stations) return null;
+    var best = null;
+    EXTRA.stations.forEach(function (s) {
+      if (s.lat == null || s.lon == null) return;
+      if (s.soilmoist == null && s.soilmoist20cm == null) return;
+      var mi = milesBetween(t.lat, t.lon, s.lat, s.lon);
+      if (mi > 45) return;
+      if (!best || mi < best.mi) best = { s: s, mi: mi };
+    });
+    return best;
+  }
+
   /* =============================== render =============================== */
 
   var grid = document.getElementById("da-grid");
@@ -691,6 +881,104 @@ window.ALTAR_SETTINGS = {
         " &middot; " + EXPOSURES[t.exposure].name + "</p>" +
       '<div class="da-body"><p class="da-msg">Reading conditions&hellip;</p></div>';
     return el;
+  }
+
+  var MONTHS = ["January","February","March","April","May","June",
+                "July","August","September","October","November","December"];
+
+  function alertsFor(t) {
+    var seen = {}, out = [];
+    [t.zone, t.czone].forEach(function (z) {
+      (EXTRA.alerts[z] || []).forEach(function (a) {
+        if (seen[a.event]) return;
+        seen[a.event] = 1; out.push(a);
+      });
+    });
+    return out.slice(0, 3);
+  }
+
+  function alertHtml(t) {
+    var list = alertsFor(t);
+    if (!list.length) return "";
+    return list.map(function (a) {
+      var until = "";
+      if (a.ends) {
+        var d = new Date(a.ends);
+        if (!isNaN(d)) until = " until " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      }
+      return '<div class="da-alert"><b>' + esc(a.event) + "</b>" + esc(until) + "</div>";
+    }).join("");
+  }
+
+  /* Creek state relative to what this month normally runs. */
+  function creekRead(t) {
+    var g = EXTRA.creeks[t.gauge];
+    if (!t.gauge || !g) return null;
+    var meta = GAUGES[t.gauge] || {};
+    var mo = new Date().getMonth() + 1;
+    var norm = meta.med ? meta.med[mo] : null;
+    var out = { meta: meta, cfs: g.cfs, ft: g.ft, trend: g.trend, month: MONTHS[mo - 1] };
+    if (norm && g.cfs != null) {
+      out.pct = Math.round(g.cfs / norm * 100);
+      out.word = out.pct >= 150 ? "high" : out.pct >= 115 ? "up"
+               : out.pct >= 85  ? "normal" : out.pct >= 55 ? "low" : "very low";
+    } else {
+      out.word = g.trend || "—";
+    }
+    return out;
+  }
+
+  function creekFactValue(t) {
+    var c = creekRead(t);
+    if (!c) return "—";
+    if (c.pct != null) return c.word;
+    if (c.ft != null) return c.ft.toFixed(2) + "'";
+    return c.word;
+  }
+
+  /* The measured-data lines that sit under "Why this number". */
+  function measuredHtml(t) {
+    var rows = "";
+    var c = creekRead(t);
+    if (c) {
+      var bits = [];
+      if (c.cfs != null) bits.push(r0(c.cfs) + " cfs");
+      if (c.ft != null) bits.push(c.ft.toFixed(2) + " ft");
+      if (c.pct != null) bits.push(c.pct + "% of the " + c.month + " normal");
+      if (c.trend) bits.push(c.trend);
+      rows += '<li><span class="da-w" style="color:#8C7D70">creek</span><span>' +
+        esc(c.meta.name) + " · " + t.gaugeMi + " mi — " + esc(bits.join(", ")) + "</span></li>";
+    }
+    var st = nearestStation(t);
+    if (st) {
+      var s = st.s, p = [];
+      var sm = s.soilmoist20cm != null ? s.soilmoist20cm : s.soilmoist;
+      var depth = s.soilmoist20cm != null ? "20cm" : "surface";
+      if (sm != null) p.push(r0(sm * 100) + "% water at " + depth);
+      if (s.soiltemp != null) p.push(r0(s.soiltemp) + "°F soil");
+      if (p.length) {
+        rows += '<li><span class="da-w" style="color:#8C7D70">station</span><span>' +
+          esc(s.name || s.id) + " · " + st.mi.toFixed(0) + " mi — " + esc(p.join(", ")) + "</span></li>";
+      }
+    }
+    if (!rows) return "";
+    return '<div class="da-measured-in"><p class="da-sub">Measured nearby</p><ul>' + rows +
+      '</ul><p class="da-note">Gauge and station readings are observations, not forecast. ' +
+      'They sit beside the score, they don\'t change it.</p></div>';
+  }
+
+  /* Patch the observed data into cards that are already on screen. */
+  function applyExtra() {
+    TRAILS.forEach(function (t, i) {
+      var el = cards[i];
+      if (!el || !models[i]) return;
+      var a = el.querySelector(".da-alertbox");
+      if (a) a.innerHTML = alertHtml(t);
+      var f = el.querySelector(".da-creekfact dd");
+      if (f) f.textContent = creekFactValue(t);
+      var mrow = el.querySelector(".da-measured");
+      if (mrow) mrow.innerHTML = measuredHtml(t);
+    });
   }
 
   function renderCard(el, t, m) {
@@ -730,6 +1018,7 @@ window.ALTAR_SETTINGS = {
     }
 
     body.innerHTML =
+      '<div class="da-alertbox">' + alertHtml(t) + "</div>" +
       '<div class="da-readout">' +
         '<div class="da-score" style="color:' + s.color + '">' + r0(m.now.score) + "</div>" +
         "<div>" +
@@ -747,10 +1036,12 @@ window.ALTAR_SETTINGS = {
         "<div><dt>24h rain</dt><dd>" + m.p24.toFixed(2) + '"</dd></div>' +
         "<div><dt>72h rain</dt><dd>" + m.p72.toFixed(2) + '"</dd></div>' +
         "<div><dt>dry for</dt><dd>" + (m.hsr >= 120 ? "5d+" : m.hsr + "h") + "</dd></div>" +
+        (t.gauge ? '<div class="da-creekfact"><dt>creek</dt><dd>' + esc(creekFactValue(t)) + "</dd></div>" : "") +
       "</dl>" +
       '<button class="da-toggle" type="button">Why this number</button>' +
       '<div class="da-why" hidden><ul>' + drivers + "</ul>" +
         (m.hasSoil ? "" : '<p class="da-note">No soil model available for this point \u2014 score is built from rainfall and drying only.</p>') +
+        '<div class="da-measured">' + measuredHtml(t) + "</div>" +
         outlook +
       "</div>";
 
@@ -854,6 +1145,13 @@ window.ALTAR_SETTINGS = {
   function loadAll(force) {
     refreshBtn.disabled = true;
     refreshBtn.textContent = "Loading";
+
+    /* Observed data runs alongside the forecast pull. Cards render as
+       soon as the score is ready; these patch in when they arrive, and
+       are skipped silently if a source is down. */
+    Promise.all([loadAlerts(), loadCreeks(), loadStations()])
+      .then(applyExtra)
+      .catch(function () {});
 
     var cached = force ? null : readCache();
     if (cached && cached.raw) {

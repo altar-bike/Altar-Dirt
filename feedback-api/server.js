@@ -118,6 +118,138 @@ function rateLimited(ip) {
   return arr.length > 60;
 }
 
+/* ============================================================
+   CLOUDS proxy — measured soil moisture from NC State ECONet.
+
+   The CLOUDS key ("hash") must never reach the browser, and the
+   CLOUDS host sends no CORS headers, so the page cannot call it
+   directly. This endpoint does both jobs: it keeps the key here
+   and hands the browser a small, CORS-friendly JSON payload.
+
+   Env:
+     CLOUDS_HASH  the hash from api.climate.ncsu.edu. Without it
+                  /soil returns an empty station list and the page
+                  simply shows no station readings.
+     CLOUDS_LOC   station selector, default "type=ECONET;state=NC".
+   ============================================================ */
+
+const CLOUDS_URL = "https://api.climate.ncsu.edu/data.php";
+const CLOUDS_HASH = process.env.CLOUDS_HASH || "";
+const CLOUDS_LOC = process.env.CLOUDS_LOC || "type=ECONET;state=NC";
+const SOIL_VARS = ["soilmoist", "soilmoist20cm", "soiltemp"];
+const SOIL_TTL = 20 * 60 * 1000;   // ECONet publishes hourly
+
+let soilCache = { at: 0, payload: null };
+let metaCache = { at: 0, byId: null };
+
+function cloudsUrl(extra) {
+  const u = new URL(CLOUDS_URL);
+  const base = {
+    hash: CLOUDS_HASH, loc: CLOUDS_LOC, output: "json",
+    start: "-6 hours", end: "now", obtype: "H", int: "1 hour",
+    missing: "", qcfail: "", na: ""
+  };
+  Object.entries(Object.assign(base, extra || {}))
+    .forEach(function (kv) { u.searchParams.set(kv[0], kv[1]); });
+  return u.toString();
+}
+
+function numOf(v) {
+  if (v == null) return null;
+  if (typeof v === "object") return numOf(v.value !== undefined ? v.value : null);
+  if (typeof v === "number") return isFinite(v) ? v : null;
+  const s = String(v).trim();
+  if (!s || /^(MV|QCF|NA|NO_AGG_STAT|-9999(\.0+)?)$/i.test(s)) return null;
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+
+const isId = (k) => /^[A-Z0-9]{3,6}$/.test(k);
+
+/* CLOUDS can return wide or long form and nests by location or by
+   datetime depending on arguments, so walk the tree rather than
+   assuming one shape. */
+function harvest(node, ctxId, out) {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) { node.forEach((n) => harvest(n, ctxId, out)); return; }
+
+  const id = node.location || node.loc || node.station || node.station_id || ctxId;
+  const rec = () => (out[id] = out[id] || { id });
+
+  if (id) {
+    for (const v of SOIL_VARS) {
+      if (node[v] !== undefined) {
+        const n = numOf(node[v]);
+        if (n !== null) rec()[v] = n;
+      }
+    }
+    /* long form: one row per parameter */
+    if (node.var && SOIL_VARS.indexOf(node.var) !== -1 && node.value !== undefined) {
+      const n = numOf(node.value);
+      if (n !== null) rec()[node.var] = n;
+    }
+    if (node.datetime && out[id]) out[id].at = node.datetime;
+    /* metadata fields, when present */
+    const la = numOf(node.latitude !== undefined ? node.latitude : node.lat);
+    const lo = numOf(node.longitude !== undefined ? node.longitude : node.lon);
+    if (la !== null && lo !== null) { rec().lat = la; rec().lon = lo; }
+    if (node.name && typeof node.name === "string") rec().name = node.name.slice(0, 60);
+  }
+
+  for (const [k, v] of Object.entries(node)) {
+    if (v && typeof v === "object") harvest(v, isId(k) ? k : id, out);
+  }
+}
+
+async function cloudsJson(url) {
+  const r = await fetch(url, { headers: { "User-Agent": "AltarCycles-TrailConditions" } });
+  const text = await r.text();
+  if (!r.ok) throw new Error("CLOUDS " + r.status);
+  try { return JSON.parse(text); }
+  catch (e) { throw new Error("CLOUDS returned non-JSON (" + text.slice(0, 80) + ")"); }
+}
+
+/* Station coordinates change rarely; hold them for a day. */
+async function stationMeta() {
+  if (metaCache.byId && Date.now() - metaCache.at < 24 * 3600 * 1000) return metaCache.byId;
+  const out = {};
+  try {
+    harvest(await cloudsJson(cloudsUrl({ type: "meta", var: SOIL_VARS.join(",") })), null, out);
+  } catch (e) { /* coordinates are optional */ }
+  metaCache = { at: Date.now(), byId: out };
+  return out;
+}
+
+async function soilPayload() {
+  if (soilCache.payload && Date.now() - soilCache.at < SOIL_TTL) return soilCache.payload;
+  if (!CLOUDS_HASH) return { stations: [], note: "CLOUDS_HASH not set" };
+
+  const data = {};
+  harvest(await cloudsJson(cloudsUrl({ var: SOIL_VARS.join(","), data_limit: "last" })), null, data);
+  const meta = await stationMeta();
+
+  const stations = Object.keys(data).map(function (id) {
+    const d = data[id], m = meta[id] || {};
+    return {
+      id: id,
+      name: d.name || m.name || id,
+      lat: d.lat != null ? d.lat : (m.lat != null ? m.lat : null),
+      lon: d.lon != null ? d.lon : (m.lon != null ? m.lon : null),
+      soilmoist: d.soilmoist != null ? d.soilmoist : null,
+      soilmoist20cm: d.soilmoist20cm != null ? d.soilmoist20cm : null,
+      soiltemp: d.soiltemp != null ? d.soiltemp : null,
+      at: d.at || null
+    };
+  }).filter(function (s) {
+    return s.lat != null && s.lon != null &&
+      (s.soilmoist != null || s.soilmoist20cm != null || s.soiltemp != null);
+  });
+
+  const payload = { stations: stations, fetched: new Date().toISOString() };
+  soilCache = { at: Date.now(), payload: payload };
+  return payload;
+}
+
 /* ------------------------- server ------------------------- */
 
 const server = http.createServer(function (req, res) {
@@ -155,6 +287,44 @@ const server = http.createServer(function (req, res) {
       "Content-Disposition": 'attachment; filename="altar-ratings.csv"'
     });
     return res.end(out);
+  }
+
+  if (req.method === "GET" && url.pathname === "/soil") {
+    soilPayload()
+      .then(function (p) {
+        res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "public, max-age=600" });
+        res.end(JSON.stringify(p));
+      })
+      .catch(function (e) {
+        /* Never fail the page over this — it is supplementary data. */
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ stations: [], error: String(e.message || e).slice(0, 160) }));
+      });
+    return;
+  }
+
+  /* Shape-check the upstream response while wiring CLOUDS up. Token
+     protected, and the hash is scrubbed in case it ever echoes back. */
+  if (req.method === "GET" && url.pathname === "/soil/raw") {
+    if (!tokenOk(url.searchParams.get("token"))) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      return res.end("Forbidden");
+    }
+    const which = url.searchParams.get("type") === "meta"
+      ? { type: "meta", var: SOIL_VARS.join(",") }
+      : { var: SOIL_VARS.join(","), data_limit: "last" };
+    (CLOUDS_HASH ? cloudsJson(cloudsUrl(which)) : Promise.reject(new Error("CLOUDS_HASH not set")))
+      .then(function (j) {
+        let s = JSON.stringify(j).slice(0, 20000);
+        if (CLOUDS_HASH) s = s.split(CLOUDS_HASH).join("[redacted]");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(s);
+      })
+      .catch(function (e) {
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: String(e.message || e).slice(0, 300) }));
+      });
+    return;
   }
 
   if (req.method === "POST") {
