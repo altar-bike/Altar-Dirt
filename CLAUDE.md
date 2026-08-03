@@ -234,11 +234,12 @@ CLOUDS also sends no CORS headers, so a proxy is required regardless.
   `/soil/raw` against the parser before assuming the API broke.
 - Endpoint is `api.climate.ncsu.edu/data.php`; variables are
   `soilmoist`, `soilmoist20cm` (m³/m³) and `soiltemp` (°F).
-**Station matching is elevation-aware, not just nearest.** Soil at
-5,000ft behaves nothing like soil in the valley, so the page costs
-1,000ft of elevation difference about the same as 10 miles, using the
-trail elevation Open-Meteo returns and the station elevation CLOUDS
-reports in feet. Two reasons this is right:
+**Station matching is elevation-aware, and biased low.** Matt's call
+(3 Aug 2026) is to read from the lower stations everywhere, so a station
+*above* the trail is penalised about three times harder than one below
+it — a summit sensor never wins on distance alone. Elevation comes from
+Open-Meteo for the trail and CLOUDS for the station, both in feet.
+Two reasons elevation matters at all:
 
 1. Without it, DuPont sat exactly 16.1 mi from both FLET (2,067ft,
    0.44 m³/m³, 88°F) and FRYI (5,320ft, 0.25, 65°F) and picked between
@@ -260,13 +261,31 @@ can see "2,067 ft" and judge whether it speaks for where they ride.
 Splitting Pisgah into a low and a high entry fixes the pin, the station
 match, and the score in one move. Needs Matt.
 
-**Caveat on FLET.** Mountain Horticultural Crops Research Station is a
-working agricultural research station and reads much wetter than nearby
-sites (0.44 m³/m³ against 0.25–0.30 at Frying Pan and Green River).
-Some of that is likely irrigation, not weather. Treat its absolute
-moisture with suspicion; its *trend* is still useful. GRGL (Green River
-Game Land, 2,080ft) is unirrigated woodland at a similar elevation and
-may be the better valley reference — worth asking Matt.
+**Caveat on FLET, and it now matters more.** Mountain Horticultural
+Crops Research Station is a working agricultural research station and
+reads much wetter than nearby sites (0.44 m³/m³ against 0.25–0.30 at
+Frying Pan and Green River). Some of that is likely irrigation, not
+weather. With the low bias in place **all five NC trails now resolve to
+FLET**, so one possibly-irrigated sensor is speaking for Bent Creek,
+North Mills River, Pisgah, DuPont and Kanuga at once — and every card
+reports the same "~16–20 points wetter than the model" line, which is
+suspicious precisely because it is identical everywhere.
+
+GRGL (Green River Game Land, 2,080ft) is unirrigated woodland at
+effectively the same elevation and loses to FLET by a fraction of a
+mile on the southern trails. Pinning `station: "GRGL"` on DuPont and
+Ride Kanuga would spread the load and probably read truer. Matt's call.
+
+### Interpreting the numbers
+
+`creekMeaning()` and `stationMeaning()` turn the readings into plain
+English under **Measured nearby**. Creek flow is read against the
+seasonal normal (ground full vs shedding water), station soil against
+the model's 0.11–0.27 tacky band, and when the two disagree by 8 points
+or more the card says so outright — that gap is the reason for
+measuring anything. Soil temperature calls out freeze, slow drying and
+fast drying. Keep the copy in the brand voice: short sentences, plain,
+dry, no marketing words.
 
 ## Hard constraints
 
