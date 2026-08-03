@@ -245,8 +245,14 @@ The tiebreak exists because DuPont sits 16.1 miles from *both* FLET
 (2,067ft, 0.44 m³/m³) and FRYI (5,320ft, 0.25) — without a rule, which
 of two wildly different numbers it showed came down to iteration order.
 Current picks: Bent Creek, North Mills River, DuPont and Ride Kanuga →
-FLET; Pisgah Proper → FRYI (nothing else within 2 mi of its 8);
-Wilson Creek → MORG; Hatley Pointe → BURN.
+FLET; Wilson Creek → MORG; Hatley Pointe → BURN.
+
+**Pisgah Proper is pinned to FLET** via `station: "FLET"`. Distance
+alone would give it Frying Pan Mountain (8 mi, 5,320ft) over FLET
+(13.7 mi, 2,067ft), but Matt's read is that most of the riding —
+Black Mountain, Clawhammer, Bennett Gap — sits nearer the valley than
+the summit, so the lower sensor speaks for more of it. This is the
+kind of call to take from him rather than the map.
 
 **Caveat on FLET.** Mountain Horticultural Crops Research Station is a
 working agricultural research station and reads much wetter than nearby
@@ -257,12 +263,11 @@ unirrigated woodland at effectively the same elevation and loses to
 FLET by half a mile on the southern trails — pinning it on DuPont and
 Ride Kanuga is the fallback if FLET's numbers look wrong in practice.
 
-**Pisgah Proper reads from a 5,320ft summit while the card is pinned at
-the 2,100ft ranger station.** The station is right for the riding and
-wrong for the pin, which is another face of the known weak point below.
-The station line prints its elevation so a reader can judge. Splitting
-Pisgah into a low and a high entry fixes the pin, the station and the
-score together. Needs Matt.
+The station line prints its elevation so a reader can judge whether it
+speaks for where they ride. Splitting Pisgah into a low and a high
+entry would still be the cleaner fix — it would let the high country
+use Frying Pan Mountain and the valley use FLET, instead of one pin
+standing in for a 3,000ft spread. Needs Matt.
 
 ### Interpreting the numbers
 

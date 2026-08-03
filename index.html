@@ -369,14 +369,21 @@ window.ALTAR_SETTINGS = {
      gauge : USGS stream gauge site number, or null when nothing close
              enough is representative. gaugeMi is its distance in miles.
              Gauges were chosen from active USGS sites with realtime data;
-             see the GAUGES table below for names and normals. */
+             see the GAUGES table below for names and normals.
+     station: optional ECONet station id to pin. Leave it off and the
+             page takes the closest one, breaking near-ties downhill.
+             Set it when local knowledge beats the map. */
   var TRAILS = [
     { name: "Bent Creek",       place: "Pisgah NF, NC",         lat: 35.4919, lon: -82.6285, soil: "rocky", exposure: "shaded",
       zone: "NCZ053", czone: "NCC021", gauge: "0344878100", gaugeMi: 5.1 },
     { name: "North Mills River", place: "Trace Ridge, NC",       lat: 35.4204, lon: -82.6567, soil: "rocky", exposure: "mixed",
       zone: "NCZ065", czone: "NCC089", gauge: "03446000",   gaugeMi: 3.8 },
+    /* station pinned: the closest sensor is Frying Pan Mountain at
+       5,320ft, but Matt's read is that most of the riding here — Black
+       Mountain, Clawhammer, Bennett Gap — sits nearer the valley than
+       the summit, so the lower station speaks for more of it. */
     { name: "Pisgah Proper",    place: "Davidson River, NC",     lat: 35.2849, lon: -82.7270, soil: "rocky", exposure: "shaded",
-      zone: "NCZ064", czone: "NCC175", gauge: "03441000",   gaugeMi: 1.4 },
+      zone: "NCZ064", czone: "NCC175", gauge: "03441000",   gaugeMi: 1.4, station: "FLET" },
     { name: "DuPont",           place: "Cedar Mountain, NC",     lat: 35.1990, lon: -82.6180, soil: "rocky", exposure: "mixed",
       zone: "NCZ064", czone: "NCC175", gauge: "03441000",   gaugeMi: 7.1 },
     { name: "Ride Kanuga",      place: "Hendersonville, NC",     lat: 35.2860, lon: -82.5290, soil: "clay",  exposure: "mixed",
