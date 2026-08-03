@@ -93,7 +93,21 @@ node --check /tmp/app.js
 grep -c 'open-meteo.com' index.html      # must be >= 1 (licence requires attribution)
 grep -c 'id="da-grid"' index.html        # must be 1
 grep -o 'name: "[^"]*"' index.html | head -20   # trail list sanity
+
+# 3. actually load the page (needs: npm i playwright)
+node smoke-test.mjs
 ```
+
+**`node --check` is not enough.** The score model runs under
+`"use strict"`, so an undeclared variable is a clean parse and a
+runtime explosion. That exact bug shipped once: removing the old
+drying loop took its `var k` with it, the freeze/thaw check below
+still used `k`, and every card on the live site read "Couldn't load
+conditions. k is not defined". `smoke-test.mjs` loads `index.html` in
+a headless browser against a synthetic Open-Meteo response and fails
+on any page error or unrendered card. Set `NOW_HOUR` to move around
+the drying curve — 92 lands in a wet spell and exercises the recovery
+branch that a dry forecast never reaches.
 
 Then commit with a message saying what changed and why, push, wait for Pages, and **fetch the live URL to confirm** before telling Matt it's done.
 
@@ -133,6 +147,41 @@ Search by string, never by line number — line numbers move.
 Never guess a coordinate. Look it up and say where you got it.
 
 ---
+
+## The water balance
+
+The wetness side of the score is a running store of how much rain is
+still in the top of the trail. Each hour: rain adds to it, then it
+decays exponentially against the same drying rate the aspect already
+uses. `var DECAY` (0.06) sets the speed — roughly two thirds of the
+water gone in a day of average drying.
+
+It replaced `hoursSinceRain × drying energy`, which had **no memory**:
+the counter reset to zero on any trace, so 0.02" of drizzle wiped a
+full day of accumulated drying and cost the score 43 points in a single
+hour. Scores sawtoothed — rideable at 4pm, not at 6pm, rideable again
+by midnight. On the same forecast the store holds the swing to 26
+points, and what remains is the active-rain penalty, which is honest
+because it *is* raining that hour.
+
+The soil and exposure multipliers now drive both sides: `wet` scales
+how hard the water hurts, `dry` scales how fast the store empties. So
+recalibrating those still works exactly as described below.
+
+**`DECAY` is a guess, like the rest of the multipliers.** It is the
+easiest one to check, because ECONet gives measured soil moisture:
+after a storm, plot the station's decay against the store's and see
+whether they fall at the same rate. That check needs no rider ratings.
+
+### Drying time
+
+Because the store only falls between rain, "when does it dry" is a
+crossing rather than a threshold the score flickers across. Cards with
+no good window today say when the model brings it back —
+`GOOD = 72`, held for `HOLD = 3` hours, and the reported hour must be
+in daylight, since the crossing often happens overnight and "dries out
+2am" is true and useless. `water_in` and `dries_out` ride along in the
+ratings payload so a rider's verdict can be matched against both.
 
 ## Task: recalibrate the model
 

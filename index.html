@@ -631,7 +631,7 @@ window.ALTAR_SETTINGS = {
           drivers.push({ w: "+", t: "soil frozen at 6cm (" + r0(st) + "\u00B0F) \u2014 firm underneath" });
         } else {
           var wasFrozen = false;
-          for (k = Math.max(0, i - 18); k < i; k++) {
+          for (var k = Math.max(0, i - 18); k < i; k++) {
             var v = h.soil_temperature_6cm[k];
             if (v != null && v <= 30) wasFrozen = true;
           }
@@ -706,13 +706,17 @@ window.ALTAR_SETTINGS = {
     var nowEval = evaluate(nowIdx);
     var GOOD = 72, HOLD = 3, recovery = null;
     if (nowEval.score < GOOD) {
-      var run = 0, from = -1;
       for (i = nowIdx + 1; i < times.length; i++) {
-        if (evaluate(i).score >= GOOD) {
-          if (run === 0) from = i;
-          run++;
-          if (run >= HOLD) { recovery = times[from]; break; }
-        } else { run = 0; from = -1; }
+        /* Report a time someone can actually ride. The model often
+           crosses back overnight; "dries out 2am" is true and useless,
+           so only daylight hours can start the window. */
+        var rh = parseInt(times[i].slice(11, 13), 10);
+        if (rh < sunrise || rh > sunset) continue;
+        var holds = true;
+        for (var q = 0; q < HOLD; q++) {
+          if (i + q >= times.length || evaluate(i + q).score < GOOD) { holds = false; break; }
+        }
+        if (holds) { recovery = times[i]; break; }
       }
     }
 
