@@ -482,6 +482,18 @@ window.ALTAR_SETTINGS = {
   }
   function fmtRange(a, b) { return hourLabel(a) + "\u2013" + hourLabel(Math.min(23, b + 1)); }
 
+  /* "later today, 4p" \u00b7 "tomorrow 9a" \u00b7 "Thursday 2p" */
+  function whenLabel(iso, todayDate) {
+    var datePart = iso.slice(0, 10);
+    var hr = parseInt(iso.slice(11, 13), 10);
+    var days = Math.round((Date.parse(datePart + "T00:00:00Z") -
+                           Date.parse(todayDate + "T00:00:00Z")) / 86400000);
+    if (days <= 0) return "later today, " + hourLabel(hr);
+    if (days === 1) return "tomorrow " + hourLabel(hr);
+    var d = new Date(datePart + "T12:00:00");
+    return d.toLocaleDateString(undefined, { weekday: "long" }) + " " + hourLabel(hr);
+  }
+
   function sumPrecip(arr, end, hours) {
     var s = 0;
     for (var i = Math.max(0, end - hours + 1); i <= end; i++) s += arr[i] || 0;
@@ -544,6 +556,32 @@ window.ALTAR_SETTINGS = {
 
     var rates = [];
     for (i = 0; i < times.length; i++) rates.push(dryingRate(h, i, dryMult));
+    var speedWord = dryMult >= 1.25 ? "fast" : dryMult <= 0.75 ? "slow" : "steady";
+
+    /* ---------------- water balance ----------------
+       How much rain is still sitting in the top of the trail. Rain adds
+       to it, drying energy takes it away, hour by hour, and what's left
+       is what makes a trail soft.
+
+       This replaces "hours since it last rained", which reset to zero on
+       any trace — two hundredths of an inch used to wipe out a full day
+       of accumulated drying and cost the score forty points in an hour.
+       A store carries its history instead, so a sprinkle costs a
+       sprinkle's worth and nothing more.
+
+       Decay is exponential against the same drying rate the aspect
+       already uses, so soil and exposure multipliers drive both how
+       hard wet hurts and how fast it recovers. DECAY is set so a wet
+       day sheds roughly two thirds of its water in the next 24 hours of
+       average drying — a guess, like the rest of the multipliers, and
+       the first thing to check against ECONet and rider ratings. */
+    var DECAY = 0.06;
+    var water = [], wStore = 0;
+    for (i = 0; i < times.length; i++) {
+      wStore = (wStore + (h.precipitation[i] || 0)) * Math.exp(-DECAY * rates[i]);
+      if (wStore < 0.0005) wStore = 0;
+      water.push(wStore);
+    }
     var hasSoil = false;
     if (h.soil_moisture_3_to_9cm) {
       for (i = 0; i < h.soil_moisture_3_to_9cm.length; i++) {
@@ -569,29 +607,22 @@ window.ALTAR_SETTINGS = {
         }
       }
 
-      var p24 = sumPrecip(h.precipitation, i, 24);
-      var p72 = sumPrecip(h.precipitation, i, 72);
-      var rainP = Math.min(55, (p24 * 42 + Math.max(0, p72 - p24) * 11) * soilMult);
-      if (rainP > 1) {
-        score -= rainP;
-        drivers.push({ w: "\u2212" + r0(rainP), t: p24.toFixed(2) + '" past 24h, ' + p72.toFixed(2) + '" past 72h' });
+      var wt = water[i];
+      var hsr = hoursSinceRain(h.precipitation, i);
+      if (wt > 0.004) {
+        p = Math.min(58, wt * 46 * soilMult);
+        if (p > 1) {
+          score -= p;
+          drivers.push({ w: "\u2212" + r0(p),
+            t: wt.toFixed(2) + '" of rain still in the surface, ' + speedWord + " to shed on this aspect" });
+        }
+      } else if (hsr > 6) {
+        drivers.push({ w: "ok", t: "nothing left from the last rain \u2014 " + speedWord + " drying on this aspect" });
       }
 
       var pNow = h.precipitation[i] || 0;
       if (pNow >= 0.02) { score -= 24; drivers.push({ w: "\u221224", t: "rain falling right now" }); }
       else if (pNow > 0) { score -= 9; drivers.push({ w: "\u22129", t: "trace precipitation" }); }
-
-      var hsr = hoursSinceRain(h.precipitation, i);
-      if (hsr > 0) {
-        var energy = 0;
-        for (var k = i - hsr + 1; k <= i; k++) if (k >= 0) energy += rates[k];
-        var credit = Math.min(32, energy * 1.5);
-        if (credit > 1) {
-          score += credit;
-          var speed = dryMult >= 1.25 ? "fast" : dryMult <= 0.75 ? "slow" : "steady";
-          drivers.push({ w: "+" + r0(credit), t: hsr + "h since rain, " + speed + " drying on this aspect" });
-        }
-      }
 
       var st = h.soil_temperature_6cm ? h.soil_temperature_6cm[i] : null;
       if (st != null) {
@@ -666,6 +697,25 @@ window.ALTAR_SETTINGS = {
     }
     if (best && best.mean < 42) best = null;
 
+    /* When does it come back? Only worth answering when the model has
+       it out of the good band now. Three hours in a row, so one
+       flattering hour in the middle of a wet spell doesn't count as
+       dried out. This is the water balance's real payoff: the store
+       only falls between rain, so the crossing is a time, not a
+       number that flickers back and forth across the threshold. */
+    var nowEval = evaluate(nowIdx);
+    var GOOD = 72, HOLD = 3, recovery = null;
+    if (nowEval.score < GOOD) {
+      var run = 0, from = -1;
+      for (i = nowIdx + 1; i < times.length; i++) {
+        if (evaluate(i).score >= GOOD) {
+          if (run === 0) from = i;
+          run++;
+          if (run >= HOLD) { recovery = times[from]; break; }
+        } else { run = 0; from = -1; }
+      }
+    }
+
     var outlook = [];
     [1, 2, 3, 4, 5].forEach(function (off) {
       var date = data.daily.time[dayIdx + off];
@@ -686,7 +736,8 @@ window.ALTAR_SETTINGS = {
     });
 
     return {
-      now: evaluate(nowIdx), today: today, best: best, outlook: outlook,
+      now: nowEval, today: today, best: best, outlook: outlook,
+      recovery: recovery, waterNow: water[nowIdx],
       hasSoil: hasSoil, nowIdx: nowIdx,
       p24: sumPrecip(h.precipitation, nowIdx, 24),
       p72: sumPrecip(h.precipitation, nowIdx, 72),
@@ -1111,7 +1162,11 @@ window.ALTAR_SETTINGS = {
       "</div>" +
       '<p class="da-window">' + (m.best
         ? "Best window today <b>" + fmtRange(m.best.from, m.best.to) + "</b>"
-        : "No good window left today.") + "</p>" +
+        : m.recovery
+          ? "Not today. Dries out <b>" + esc(whenLabel(m.recovery, m.current.time.slice(0, 10))) + "</b>"
+          : m.now.score < 72
+            ? "Not today, and nothing in the forecast brings it back this week."
+            : "No good window left today.") + "</p>" +
       '<div class="da-strip">' + strip + "</div>" +
       '<div class="da-axis"><span>12a</span><span>6a</span><span>noon</span><span>6p</span><span>11p</span></div>' +
       '<dl class="da-facts">' +
@@ -1408,6 +1463,10 @@ window.ALTAR_SETTINGS = {
       rain_24h: Math.round(m.p24 * 100) / 100,
       rain_72h: Math.round(m.p72 * 100) / 100,
       hours_since_rain: m.hsr,
+      /* the water-balance store behind the score, so a rating can be
+         matched to it when the decay constant gets calibrated */
+      water_in: m.waterNow == null ? "" : Math.round(m.waterNow * 1000) / 1000,
+      dries_out: m.recovery || "",
       wet_mult: m.wetMult, dry_mult: Math.round(m.dryMult * 100) / 100,
       model_time: m.localTime
     };

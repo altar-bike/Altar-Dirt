@@ -45,7 +45,7 @@ const FIELDS = [
   "shown_score", "shown_state", "verdict", "actual", "when", "note",
   "reporter_name", "reporter_id",
   "soil_moisture", "soil_temp_f", "air_temp_f",
-  "rain_24h", "rain_72h", "hours_since_rain",
+  "rain_24h", "rain_72h", "hours_since_rain", "water_in", "dries_out",
   "wet_mult", "dry_mult", "model_time", "tz_offset_min",
   "lat", "lon", "v"
 ];
