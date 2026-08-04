@@ -294,6 +294,35 @@ downhill. With USCRN in the pool, **Bent Creek now reads from Asheville
 `CLOUDS_LOC` and `CLOUDS_WX_LOC` env vars control which networks and
 counties are queried, if the sensor set needs widening.
 
+**The Bent Creek miss, 4 Aug 2026 — read this before trusting a score.**
+Matt said it looked like it had rained at Bent Creek. It had: the USCRN
+station 0.8 mi away measured 0.92" over four hours the previous evening
+(0.39 / 0.08 / 0.13 / 0.32 hourly) and **Open-Meteo had 0.00" for the
+entire day** — not underestimated, missed. Hominy Creek confirmed it
+independently, 39 → 77 cfs in three hours. The card read 94 and hero
+dirt because Bent Creek had no gauge inside `WX_MAX_MI` and the water
+balance was running on a forecast that said it never rained.
+
+Two fixes went in, and two lessons worth keeping:
+
+1. **USCRN now feeds the rain series, not just the soil series.** Its
+   rain gauge was being pulled past and ignored while the same station
+   supplied soil moisture. After the fix Bent Creek reads 82 / Good,
+   0.92" in 24h, dry for 18h. *When a station is already in hand, check
+   every variable it carries before reaching for another source.*
+2. **Creek trend comes from instantaneous readings against 12 hours
+   back, not daily means.** A daily mean averaged a near-doubling into
+   "steady". The card now prints the 12-hour change and says outright,
+   above 40%, that rain fell in the watershed whether the forecast
+   caught it or not — the only warning a rider gets when the forecast
+   misses. *An aggregate that hides the event is worse than no
+   aggregate.*
+
+The general lesson: a trail with no gauge inside the threshold has
+**no defence against a forecast miss**. Ride Kanuga and Hatley Pointe
+are still in that position. The daily cross-check exists to catch this,
+but it ran a day behind Matt's own eyes.
+
 **Verified live, 4 Aug 2026.** Bent Creek reads USCRN Asheville 8 SSW at
 1 mi (24% water, against FLET's 44% six miles out). Pisgah Proper's
 gauge measured 0.98" over 72h where the forecast had 0.50"; DuPont's
