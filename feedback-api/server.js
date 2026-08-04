@@ -345,8 +345,11 @@ const server = http.createServer(function (req, res) {
     const which = url.searchParams.get("type") === "meta"
       ? { type: "meta", var: SOIL_VARS.join(",") }
       : { var: SOIL_VARS.join(","), data_limit: "last" };
-    /* narrow the response while debugging: ?loc=FLET&metadata=no&section=data */
-    ["loc", "metadata", "start", "end", "int", "obtype"].forEach(function (k) {
+    /* narrow the response while debugging: ?loc=FLET&metadata=no&section=data
+       `var` matters as much as the rest — without it every query silently
+       asked for soil moisture, which made other networks look empty when
+       they were only being asked the wrong question. */
+    ["loc", "var", "metadata", "start", "end", "int", "obtype", "qclimit"].forEach(function (k) {
       const v = url.searchParams.get(k);
       if (v) which[k] = v;
     });
