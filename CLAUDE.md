@@ -430,7 +430,23 @@ Three things this changes, in order of value:
 - **Coweeta Hydrologic Laboratory** (USFS, Otto NC) — decades of soil
   moisture and streamflow, ~60 mi southwest. Public but not an API.
 - **Synoptic Data / MesoWest** — aggregates RAWS plus CWOP personal
-  stations; free non-commercial tier, needs a token.
+  stations. **Checked 4 Aug 2026: no usable free tier.** Their Open
+  Access programme is restricted to students and faculty at accredited
+  US institutions with a .edu address and explicitly excludes commercial
+  entities, so Altar does not qualify. Remaining options are a 14-day
+  trial and then commercial pricing, which is quote-only. Tokens are
+  managed at customer.synopticdata.com/credentials. Deprioritise.
+- **CoCoRaHS is already on the CLOUDS key** — `type=COCORAHS`. It is the
+  volunteer rain-gauge network and there are enough *active* observers in
+  Madison County (Hatley Pointe) and Henderson County (Ride Kanuga) to
+  overflow a 20KB debug response, which is exactly where the two rain
+  gaps are. Not yet integrated. Two things to know before wiring it up:
+  readings are **daily and manual**, not hourly, so they cannot feed the
+  hourly water balance directly — treat them as a daily total to
+  cross-check the forecast, or distribute across the day. And
+  `/soil/raw` caps output at 20,000 characters, which a single county's
+  CoCoRaHS metadata exceeds; raise the cap or filter server-side before
+  trying to enumerate the nearest observer.
 - **Crew-owned stations** — Tempest and Ambient Weather both have APIs.
   No soil moisture, but on-trail rain gauges from riders would beat
   forecast rain. Worth asking the crew.
