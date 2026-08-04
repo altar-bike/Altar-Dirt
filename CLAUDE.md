@@ -724,22 +724,47 @@ After regenerating, verify the file contains **zero** `{{` and no `%}` outside t
   the score — only once there's calibration data to justify it
 - Any soil or exposure correction — he's ridden them, you haven't
 - Anything that spends money or changes a live customer-facing page
-- **Whether one extreme hour from one gauge should be allowed to carry a
-  score on its own.** At 17:00 on 4 Aug 2026 SMPN7 reported 1.22 inches
-  in a single hour and took Pisgah Proper from the high 80s to 38. The
-  reading is probably real — RUTN7 caught 0.43 and MAHN7 0.11 in the same
-  hour, UNCA 0.33 the hour before, so there was genuine convection across
-  the region — but DARN7, 4.6 miles away, caught 0.00, and Davidson River
-  1.4 miles away was still flat at 44 cfs through the last USGS reading.
-  Nothing corroborated it at the moment the score moved. A stuck tipping
-  bucket dumping its backlog into one hour looks identical to a cloudburst
-  from inside the data.
-  Options: cap a single hour's contribution, require a second gauge or a
-  creek rise before an extreme hour counts fully, or leave it and accept
-  that the failure is in the safe direction (too wet, not too dry). The
-  third is defensible and is the current behaviour. Don't change scoring
-  on this without Matt — and note the Bent Creek fix was trustworthy
-  precisely *because* Hominy Creek confirmed it independently.
+- **Whether a close gauge should be trusted to speak for a trail during
+  convective season.** Resolved the "is it real" half on 4 Aug 2026; the
+  design question that replaced it is sharper and still Matt's.
+
+  SMPN7 reported 1.22 inches in the 17:00 hour and took Pisgah from the
+  high 80s to 38 (Lower, after the split). **The rain was real.** The
+  hourly shape is a textbook storm — 0.01, 0.09, **1.22**, 0.13 — and a
+  stuck tipping bucket dumping its backlog would be an isolated spike
+  with nothing after it, not a ramp and a tail. RUTN7 independently ran
+  0.03, 0.03, **0.43**, 0.07: same profile, same hour, different network
+  county. Two stations, two storm shapes. Not an artifact.
+
+  **But the creek never moved.** Davidson River, 1.4 mi from the trail
+  anchor and draining the ground SMPN7 sits on, ran 44.4 → 43.0 → 44.4
+  across the two hours after the burst: 3%, which is rounding noise at
+  that flow. Hominy Creek declined steadily through the same window.
+  Compare Bent Creek on 3 Aug, where 0.92 inches sent Hominy 39 → 77 cfs
+  in three hours.
+
+  Two things explain the gap and both matter. The watershed is genuinely
+  dry — 62% of the August normal — and dry soil swallows the first inch
+  rather than shedding it, which is the same physics the score already
+  encodes when it says "the watershed is dry, so trails shed what falls
+  on them." And the cell was tiny: DARN7 at 4.6 mi caught 0.00, FRYI at
+  7 mi caught 0.00 in that hour. A cell a couple of miles across can sit
+  on the gauge and miss the trail, or sit on the trail and miss the
+  gauge, and nothing in the data distinguishes those.
+
+  So the real question is not "cap the hour" — capping a correct
+  measurement is the wrong fix. It is: **in convective season, should an
+  extreme localised reading from a single gauge inside `WX_MAX_MI` be
+  scored as fact, or flagged as uncertain?** Options, roughly ascending
+  in ambition: leave it (current behaviour, errs wet, defensible); say
+  so on the card when one gauge inside the threshold disagrees sharply
+  with every other gauge within ~10 mi, letting the rider judge; or let
+  a flat creek downgrade confidence in a gauge spike, which is the
+  physically honest version and also the one that needs calibration data
+  before it can be trusted. **Matt's call.** Note that Bent Creek was
+  trustworthy precisely *because* Hominy confirmed it — the asymmetry is
+  that a creek rise corroborates rain, while a flat creek during drought
+  proves very little.
 
 ## Report honestly
 
