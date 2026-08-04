@@ -92,11 +92,35 @@ await page.goto("file://" + process.cwd() + "/index.html", { waitUntil: "load" }
 await page.waitForTimeout(4000);
 await page.evaluate(() => document.querySelectorAll(".da-toggle").forEach((b) => b.click()));
 
+/* Out-of-state areas sit behind a button and must NOT have loaded yet. */
+const before = await page.evaluate(() => ({
+  awayHidden: document.getElementById("da-away-grid")?.hidden,
+  awayBtn: !!document.getElementById("da-away-btn"),
+  awayScored: [...document.querySelectorAll("#da-away-grid .da-score")].length,
+  localScored: [...document.querySelectorAll("#da-grid .da-score")].length
+}));
+if (before.awayHidden !== true) problems.push("away grid should start hidden");
+if (!before.awayBtn) problems.push("away load button missing");
+if (before.awayScored !== 0) problems.push("away trails fetched before being asked for");
+
+/* ...and must load on click. */
+await page.click("#da-away-btn");
+await page.waitForTimeout(3000);
+const after = await page.evaluate(() => ({
+  awayHidden: document.getElementById("da-away-grid")?.hidden,
+  awayBtn: !!document.getElementById("da-away-btn"),
+  awayScored: [...document.querySelectorAll("#da-away-grid .da-score")].length
+}));
+if (after.awayHidden !== false) problems.push("away grid still hidden after click");
+if (after.awayBtn) problems.push("away button should be gone after loading");
+if (after.awayScored === 0) problems.push("away trails did not load on click");
+
 const r = await page.evaluate(() => {
   const cards = [...document.querySelectorAll(".da-card")];
   return {
     cards: cards.length,
     errors: [...document.querySelectorAll(".da-err")].map((e) => e.textContent),
+    verdict: document.getElementById("da-verdict")?.textContent.replace(/\s+/g, " ").trim(),
     scores: cards.map((c) => c.querySelector(".da-score")?.textContent ?? null),
     windows: cards.map((c) => c.querySelector(".da-window")?.textContent.trim()),
     drivers: [...(cards[0]?.querySelectorAll(".da-why li") || [])].map((l) => l.textContent.replace(/\s+/g, " ").trim()),
@@ -115,6 +139,9 @@ if (r.errors.length) problems.push("cards showing an error: " + r.errors[0]);
 if (r.cards !== 9) problems.push("expected 9 cards, got " + r.cards);
 if (r.scores.some((s) => s === null)) problems.push("a card rendered no score");
 
+console.log("local   :", before.localScored, "scored on load; away:", before.awayScored,
+            "-> after click:", after.awayScored);
+console.log("verdict :", r.verdict);
 console.log("scores  :", r.scores.join(" "));
 console.log("window  :", r.windows[0]);
 console.log("drivers :", r.drivers.join("  |  "));

@@ -206,6 +206,18 @@ window.ALTAR_SETTINGS = {
 }
 #dirt-app .da-retry:hover{border-color:var(--rust);color:var(--rust);}
 
+/* ---------- worth the drive: loaded on request ---------- */
+#dirt-app .da-away{border-top:1px solid var(--line);margin-top:34px;padding-top:22px;}
+#dirt-app .da-away h2{font-size:30px;letter-spacing:.015em;}
+#dirt-app .da-away .lede{margin:8px 0 16px;font-size:15px;color:var(--muted);max-width:56ch;}
+#dirt-app .da-away-btn{
+  font-family:'Space Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.16em;
+  text-transform:uppercase;background:transparent;color:var(--ash);border:1px solid var(--line);
+  padding:12px 20px;cursor:pointer;margin-bottom:20px;transition:border-color .15s,color .15s;
+}
+#dirt-app .da-away-btn:hover{border-color:var(--rust);color:var(--rust);}
+#dirt-app .da-away-btn[disabled]{opacity:.45;cursor:default;}
+
 /* ---------- request a riding area ---------- */
 #dirt-app .da-ask{
   background:var(--panel);border-left:3px solid var(--rust);
@@ -310,6 +322,14 @@ window.ALTAR_SETTINGS = {
   <div class="da-verdict" id="da-verdict" hidden></div>
   <main class="da-grid" id="da-grid"></main>
 
+  <section class="da-away" id="da-away">
+    <h2 class="da-display">Worth the drive</h2>
+    <p class="lede">Out of state, so we don't go and get these unless you're actually
+      thinking about the drive.</p>
+    <button class="da-away-btn" id="da-away-btn" type="button">Load conditions</button>
+    <div class="da-grid" id="da-away-grid" hidden></div>
+  </section>
+
   <section class="da-ask">
     <h2 class="da-display">Missing somewhere?</h2>
     <p class="lede">Tell us where you ride and we'll add it. The nearest town is enough &mdash; coordinates help, and so does anything you know about how the dirt behaves after rain.</p>
@@ -372,7 +392,11 @@ window.ALTAR_SETTINGS = {
              see the GAUGES table below for names and normals.
      station: optional ECONet station id to pin. Leave it off and the
              page takes the closest one, breaking near-ties downhill.
-             Set it when local knowledge beats the map. */
+             Set it when local knowledge beats the map.
+     away  : true for anything out of state. These are not fetched on
+             load — they sit behind the "Worth the drive" button, and
+             they stay out of the best-bet verdict, which is about
+             where to ride today rather than where to drive. */
   var TRAILS = [
     { name: "Bent Creek",       place: "Pisgah NF, NC",         lat: 35.4919, lon: -82.6285, soil: "rocky", exposure: "shaded",
       zone: "NCZ053", czone: "NCC021", gauge: "0344878100", gaugeMi: 5.1 },
@@ -392,10 +416,12 @@ window.ALTAR_SETTINGS = {
       zone: "NCZ501", czone: "NCC027", gauge: "02140510",   gaugeMi: 4.9 },
     { name: "Hatley Pointe",    place: "Mars Hill, NC",          lat: 35.9547, lon: -82.5088, soil: "clay",  exposure: "shaded",
       zone: "NCZ048", czone: "NCC115", gauge: null,         gaugeMi: 0   },
+    /* away: out of state, so not fetched until someone asks. Keeps the
+       page quick and keeps us off Open-Meteo for trips nobody's taking. */
     { name: "Windrock",         place: "Oliver Springs, TN",     lat: 36.0640, lon: -84.3390, soil: "rocky", exposure: "mixed",
-      zone: "TNZ036", czone: "TNC001", gauge: null,         gaugeMi: 0   },
+      zone: "TNZ036", czone: "TNC001", gauge: null,         gaugeMi: 0,   away: true },
     { name: "Snowshoe",         place: "Snowshoe, WV",           lat: 38.4120, lon: -79.9960, soil: "loam",  exposure: "shaded",
-      zone: "WVZ523", czone: "WVC075", gauge: "03180900",   gaugeMi: 5.7 }
+      zone: "WVZ523", czone: "WVC075", gauge: "03180900",   gaugeMi: 5.7, away: true }
   ];
 
   /* ==================================================================
@@ -1312,7 +1338,9 @@ window.ALTAR_SETTINGS = {
     var bestT = null;
     TRAILS.forEach(function (t, i) {
       var m = models[i];
-      if (!m) return;
+      /* the verdict answers "where do I ride today", so a four-hour
+         drive doesn't get to win it even once it's loaded */
+      if (!m || t.away) return;
       if (!bestT || m.now.score > bestT.m.now.score) bestT = { t: t, m: m };
     });
     if (!bestT) { verdictEl.hidden = true; return; }
@@ -1332,10 +1360,14 @@ window.ALTAR_SETTINGS = {
 
   /* ============================== orchestration ============================== */
 
+  var awayGrid = document.getElementById("da-away-grid");
+  var awayBtn = document.getElementById("da-away-btn");
+  var awayLoaded = false;
+
   var cards = [];
   TRAILS.forEach(function (t, i) {
     var el = cardShell(t, i);
-    grid.appendChild(el);
+    (t.away ? awayGrid : grid).appendChild(el);
     cards.push(el);
   });
 
@@ -1395,8 +1427,11 @@ window.ALTAR_SETTINGS = {
             models[i] = buildModel(t, cached.raw[ck]);
             rawStore[ck] = cached.raw[ck];
             renderCard(cards[i], t, models[i]);
-          } catch (e) { usedAll = false; }
-        } else { usedAll = false; }
+            /* an away trail in the cache was asked for on a previous
+               visit, so show it rather than making them ask again */
+            if (t.away) revealAway();
+          } catch (e) { if (!t.away) usedAll = false; }
+        } else if (!t.away) { usedAll = false; }
       });
       renderVerdict();
       stamp(cached.at);
@@ -1407,7 +1442,10 @@ window.ALTAR_SETTINGS = {
       }
     }
 
-    var queue = TRAILS.map(function (t, i) { return { t: t, i: i }; });
+    /* Only the local trails on load. Out-of-state ones join the queue
+       once they've been asked for, so Refresh keeps them current. */
+    var queue = TRAILS.map(function (t, i) { return { t: t, i: i }; })
+      .filter(function (j) { return !j.t.away || awayLoaded; });
     function worker() {
       if (!queue.length) return Promise.resolve();
       var job = queue.shift();
@@ -1424,6 +1462,37 @@ window.ALTAR_SETTINGS = {
       refreshBtn.textContent = "Refresh";
     });
   }
+
+  /* ==================== worth the drive ====================
+     Out-of-state areas are a deliberate second click. It keeps the page
+     quick, and it keeps us off the weather service for trips nobody is
+     taking — which matters more the longer the list gets. */
+  function revealAway() {
+    awayLoaded = true;
+    if (awayGrid) awayGrid.hidden = false;
+    if (awayBtn) awayBtn.remove();
+  }
+
+  function loadAway() {
+    if (awayLoaded) return;
+    revealAway();
+    var jobs = TRAILS.map(function (t, i) { return { t: t, i: i }; })
+      .filter(function (j) { return j.t.away && !rawStore[keyOf(j.t)]; });
+
+    function worker() {
+      if (!jobs.length) return Promise.resolve();
+      var job = jobs.shift();
+      return one(job.t, job.i, false).then(function () {
+        return new Promise(function (res) { setTimeout(res, 220); });
+      }).then(worker);
+    }
+    Promise.all([worker(), worker()]).then(function () {
+      writeCache(Date.now(), rawStore);
+      applyExtra();
+    });
+  }
+
+  if (awayBtn) awayBtn.addEventListener("click", loadAway);
 
   /* ======================= request a riding area ======================= */
 

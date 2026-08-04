@@ -140,6 +140,14 @@ Search by string, never by line number — line numbers move.
 
 - `soil`: `clay` | `loam` | `rocky` | `sandy`
 - `exposure`: `shaded` | `mixed` | `exposed`
+- `away: true`: out of state. Not fetched on page load — sits behind the
+  **Worth the drive** button, and excluded from the best-bet verdict,
+  which answers "where do I ride today" rather than "where could I
+  drive". Once asked for it joins the Refresh cycle, and if it's in the
+  cache from a previous visit it shows without asking again.
+  This exists to keep load time and Open-Meteo call volume down: nine
+  trails is nine calls per visitor, and the list is growing. Anything
+  out of state should get `away: true` unless Matt says otherwise.
 - Coordinates should point at **where people actually ride**, not the parking lot at the bottom. A trailhead 500ft up gives materially different numbers than the valley floor.
 
 **Known weak point:** `Pisgah Proper` is pinned at the Davidson River ranger station (~2,200ft) while the riding — Black Mountain, Clawhammer, Bennett Gap — sits well above it. That card runs optimistic for the high country. If Matt raises it, the fix is splitting into two entries at different elevations.
