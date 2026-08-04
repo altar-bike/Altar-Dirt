@@ -276,6 +276,32 @@ async function cloudsJson(url) {
   catch (e) { throw new Error("CLOUDS returned non-JSON (" + text.slice(0, 80) + ")"); }
 }
 
+/* CLOUDS caps a large response by dropping stations off the end of its
+   id ordering, and it does it silently — valid JSON, just short. Widening
+   the rain query to three networks and fourteen counties on 4 Aug 2026 cut
+   it off after NCVN7, which quietly took away SMPN7 and POPN7: the gauge
+   1.6 mi from Pisgah and the one nearest Wilson Creek. The payload looked
+   healthy the whole time.
+
+   So never send one query spanning several networks. Split `type=A,B,C`
+   into one request per network and merge — three responses the size of
+   the one that used to work. Everything else in the selector is kept as
+   it is. If a single network alone ever grows past the cap this needs
+   splitting by county too, which is why droppedIds() below exists. */
+function locVariants(loc) {
+  const parts = String(loc).split(";");
+  const ix = parts.findIndex((p) => /^\s*type=/i.test(p));
+  if (ix === -1) return [loc];
+  const types = parts[ix].split("=").slice(1).join("=")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  if (types.length < 2) return [loc];
+  return types.map(function (t) {
+    const copy = parts.slice();
+    copy[ix] = "type=" + t;
+    return copy.join(";");
+  });
+}
+
 /* Station coordinates change rarely; hold them for a day. */
 async function stationMeta(loc, vars) {
   const hit = metaCache[loc];
@@ -299,33 +325,44 @@ function normaliseMoisture(v) {
 /* Hourly rain and evapotranspiration from the fire-weather stations.
    Three days back is exactly what the page's water balance needs to
    rebuild its store from measured rather than forecast rain. */
-async function wxSeries() {
-  const j = await cloudsJson(cloudsUrl({
-    loc: CLOUDS_WX_LOC, var: WX_VARS.join(","),
-    start: "-3 days", end: "now", int: "1 hour", obtype: "H"
-  }));
-  const data = j.data || {};
-  const meta = await stationMeta(CLOUDS_WX_LOC, WX_VARS.join(","));
-  const out = [];
-  for (const id of Object.keys(data)) {
-    const byTime = data[id];
-    if (!byTime || typeof byTime !== "object") continue;
-    const hours = {};
-    let n = 0;
-    for (const t of Object.keys(byTime)) {
-      const rec = byTime[t];
-      if (!rec || typeof rec !== "object") continue;
-      const p = numOf(unwrap(rec.precip));
-      const et = numOf(unwrap(rec.evaptrans_pm));
-      if (p === null && et === null) continue;
-      /* key by local hour so it lines up with Open-Meteo's timestamps */
-      const s = String(t);
-      hours[s.slice(0, 10) + "T" + s.slice(11, 13)] = { p: p, et: et };
-      n++;
+async function wxSeries(dropped) {
+  const out = [], seen = {};
+  for (const loc of locVariants(CLOUDS_WX_LOC)) {
+    let j;
+    /* One network being down must not cost us the other two. */
+    try {
+      j = await cloudsJson(cloudsUrl({
+        loc: loc, var: WX_VARS.join(","),
+        start: "-3 days", end: "now", int: "1 hour", obtype: "H"
+      }));
+    } catch (e) { if (dropped) dropped.push("query:" + loc.split(";")[0]); continue; }
+    const data = j.data || {};
+    const meta = await stationMeta(loc, WX_VARS.join(","));
+    for (const id of Object.keys(data)) {
+      if (seen[id]) continue;
+      const byTime = data[id];
+      if (!byTime || typeof byTime !== "object") continue;
+      const hours = {};
+      let n = 0;
+      for (const t of Object.keys(byTime)) {
+        const rec = byTime[t];
+        if (!rec || typeof rec !== "object") continue;
+        const p = numOf(unwrap(rec.precip));
+        const et = numOf(unwrap(rec.evaptrans_pm));
+        if (p === null && et === null) continue;
+        /* key by local hour so it lines up with Open-Meteo's timestamps */
+        const s = String(t);
+        hours[s.slice(0, 10) + "T" + s.slice(11, 13)] = { p: p, et: et };
+        n++;
+      }
+      if (!n) continue;
+      const m = meta[id] || {};
+      /* Readings but no coordinates means the metadata response was cut
+         short — the station is real and we cannot place it. Say so. */
+      if (m.lat == null || m.lon == null) { if (dropped) dropped.push(id + ":nocoords"); continue; }
+      seen[id] = 1;
+      out.push({ id: id, name: m.name || id, lat: m.lat, lon: m.lon, elev: m.elev == null ? null : m.elev, hours: hours });
     }
-    const m = meta[id] || {};
-    if (!n || m.lat == null || m.lon == null) continue;
-    out.push({ id: id, name: m.name || id, lat: m.lat, lon: m.lon, elev: m.elev == null ? null : m.elev, hours: hours });
   }
   return out;
 }
@@ -334,9 +371,16 @@ async function soilPayload() {
   if (soilCache.payload && Date.now() - soilCache.at < SOIL_TTL) return soilCache.payload;
   if (!CLOUDS_HASH) return { stations: [], wx: [], note: "CLOUDS_HASH not set" };
 
-  const data = {};
-  harvest(await cloudsJson(cloudsUrl({ var: SOIL_VARS.join(","), data_limit: "last" })), null, data);
-  const meta = await stationMeta(CLOUDS_LOC, SOIL_VARS.join(","));
+  /* Same one-network-per-query rule as the rain feed, for the same
+     reason: a statewide two-network soil query is already close to the
+     size where CLOUDS starts trimming the tail. */
+  const data = {}, meta = {}, dropped = [];
+  for (const loc of locVariants(CLOUDS_LOC)) {
+    try {
+      harvest(await cloudsJson(cloudsUrl({ loc: loc, var: SOIL_VARS.join(","), data_limit: "last" })), null, data);
+      Object.assign(meta, await stationMeta(loc, SOIL_VARS.join(",")));
+    } catch (e) { dropped.push("query:" + loc.split(";")[0]); }
+  }
 
   const stations = Object.keys(data).map(function (id) {
     const d = data[id], m = meta[id] || {};
@@ -358,9 +402,13 @@ async function soilPayload() {
 
   /* Measured weather is a bonus — never fail the soil payload over it. */
   let wx = [];
-  try { wx = await wxSeries(); } catch (e) { wx = []; }
+  try { wx = await wxSeries(dropped); } catch (e) { dropped.push("wx:" + String(e.message || e).slice(0, 60)); }
 
+  /* `dropped` is the tell for a truncated upstream response. It is in the
+     payload rather than only in the logs so a bad day is one fetch away
+     from being visible, not a log search. */
   const payload = { stations: stations, wx: wx, fetched: new Date().toISOString() };
+  if (dropped.length) payload.dropped = dropped;
   soilCache = { at: Date.now(), payload: payload };
   return payload;
 }

@@ -388,6 +388,32 @@ CLOUDS also sends no CORS headers, so a proxy is required regardless.
   `/soil/raw` against the parser before assuming the API broke.
 - Endpoint is `api.climate.ncsu.edu/data.php`; variables are
   `soilmoist`, `soilmoist20cm` (m³/m³) and `soiltemp` (°F).
+
+**Never send one CLOUDS query spanning several networks.** CLOUDS caps a
+large response by dropping stations off the end of its id ordering, and
+it does it silently: valid JSON, parses fine, just short. On 4 Aug 2026
+widening the rain query to `type=RAWS,USCRN,ECONET` across fourteen
+counties came back cut off after `NCVN7` — which quietly removed
+`SMPN7`, the gauge 1.6 miles from Pisgah and the most valuable one in
+the whole set, along with `POPN7`. Nothing errored. The payload looked
+bigger and healthier than before while having lost the two stations that
+mattered most.
+
+`locVariants()` in `server.js` now splits any `type=A,B,C` selector into
+one request per network and merges the results, for both the soil and the
+rain feed. If a single network alone ever outgrows the cap this needs
+splitting by county too — which is what `dropped` is for. `/soil` carries
+a `dropped` array whenever a station had readings but no coordinates (the
+sign of a truncated *metadata* response) or a whole network query failed.
+An empty or absent `dropped` is the only evidence that a payload is
+complete; station count alone is not, because truncation looks like
+growth. Check it after any change to `CLOUDS_LOC` or `CLOUDS_WX_LOC`.
+
+The transferable version: **an upstream that truncates instead of
+erroring cannot be verified by looking at what arrived.** Ask what should
+have arrived and is missing. Both times this bit — the CoCoRaHS survey
+and this one — the response was well-formed and the conclusion drawn
+from it was wrong.
 **Station matching: closest wins, ties break downhill.** Matt's call
 (3 Aug 2026). Distance decides it; where two stations are within
 `STATION_TIE_MI` (2 miles) of each other they count as equally near and
