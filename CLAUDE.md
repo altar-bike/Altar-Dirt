@@ -329,6 +329,57 @@ measuring anything. Soil temperature calls out freeze, slow drying and
 fast drying. Keep the copy in the brand voice: short sentences, plain,
 dry, no marketing words.
 
+## Sensor inventory (surveyed 4 Aug 2026)
+
+The CLOUDS key already reaches **16 networks**, not just ECONet. Change
+`loc` and the same key returns far closer sensors. All of the below was
+verified live through `/soil/raw`, not inferred.
+
+### Verified, no new access needed
+
+| Sensor | Network | Distance | Elev | What it has |
+|---|---|---|---|---|
+| **Asheville 8 SSW** `0246CA` | USCRN | **0.82 mi from Bent Creek** | 2,151ft | soil moisture + temp, research grade |
+| Asheville 13 S `0255BC` | USCRN | 5.6 mi from N Mills River | 2,103ft | soil temp; moisture sensor looked down |
+| **Guion Farm** `GUIN7` | RAWS | **1.86 mi from DuPont** | 2,730ft | measured precip, RH, temp, solar, **Penman-Monteith ET** |
+| **NC Fire #2** `SMPN7` | RAWS | **1.63 mi from Pisgah Proper** | 2,671ft | same as above |
+| Davidson River `DARN7` | RAWS | 5.2 mi from Pisgah | 3,350ft | same as above |
+| 7 Mile Ridge `MAHN7` | RAWS | 13.1 mi from Hatley Pointe | 2,146ft | same as above |
+| `TR-066` Pisgah Forest alluvium | USGS GW | **0.1 mi from Pisgah Proper** | — | water-table depth, keyless |
+
+Three things this changes, in order of value:
+
+1. **USCRN Asheville 8 SSW is 0.8 miles from Bent Creek** and reads
+   24–26% soil moisture. FLET, six miles off, reads 44%. USCRN is a
+   climate-reference site with triplicate sensors and no irrigation —
+   this is strong evidence the FLET number is wrong for trail purposes,
+   not just different. Bent Creek should use USCRN.
+2. **RAWS gives measured rain and measured drying energy** ~2 miles
+   from Pisgah and DuPont. The water balance currently runs on
+   *forecast* precipitation and a hand-rolled `dryingRate()`. RAWS
+   carries `precip` and `evaptrans_pm` (Penman-Monteith
+   evapotranspiration) hourly — the physically correct drying term,
+   measured. Swapping those two inputs is probably a bigger accuracy
+   win than any multiplier retune.
+3. RAWS has **no soil moisture**, so it complements ECONet/USCRN rather
+   than replacing them. Units differ across networks: ECONet reports
+   m³/m³ (0.44), USCRN reports percent (24.3). **Normalise on ingest**
+   or the numbers are off by 100×.
+
+### Would need new access
+
+- **Bent Creek Experimental Forest** (USFS Southern Research Station) —
+  a long-term research forest *at* Bent Creek. Most promising ask; would
+  need an email.
+- **Coweeta Hydrologic Laboratory** (USFS, Otto NC) — decades of soil
+  moisture and streamflow, ~60 mi southwest. Public but not an API.
+- **Synoptic Data / MesoWest** — aggregates RAWS plus CWOP personal
+  stations; free non-commercial tier, needs a token.
+- **Crew-owned stations** — Tempest and Ambient Weather both have APIs.
+  No soil moisture, but on-trail rain gauges from riders would beat
+  forecast rain. Worth asking the crew.
+- NC DOT RWIS road-weather (subsurface temp), NC DEQ groundwater network.
+
 ## Hard constraints
 
 **Never remove the Open-Meteo attribution.** The footer link plus the note that scores are Altar's modification of their data are both required by CC BY 4.0. Non-negotiable.
