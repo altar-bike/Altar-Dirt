@@ -38,9 +38,21 @@ Hosted on **GitHub Pages** from this repo. Linked from the Shopify nav at altar.
   Installing the Railway GitHub app on the altar-bike org would remove
   this step entirely — worth doing if server changes get frequent.
   Needs Matt; it's a permission grant on his org.
-- **Weekly calibration check-in** runs as a scheduled Claude task, Mondays
-  ~7:23am ET, reading the export CSV and reporting trends to Matt. It only
-  recommends multiplier changes past the 30–50-obs-per-class threshold.
+- **Daily morning update** runs as a scheduled Claude task, ~6:47am ET
+  every day (`trig_012nabCYGc56b1bwQwcjKUxg`). Push only, no email —
+  Matt's call: he does not want a notification per rating, this note
+  replaces that. Two parts, feedback first:
+  1. **Rider feedback** — new ratings in the last 24h quoted verbatim
+     (the `note` field carries the most signal), running totals per soil
+     class, and how far each class is from the 30–50 observation bar. It
+     recommends nothing below that bar and says so plainly. Untrusted
+     `known_crew = no` rows are reported separately, never analysed.
+  2. **Rain cross-check** — CoCoRaHS vs RAWS vs forecast per trail,
+     flagging only disagreements over 0.25 in and gauges that have gone
+     quiet. CoCoRaHS is used here and nowhere else; it is the
+     independent check on the sources that do feed the score.
+  It replaced a weekly Monday check-in — calibration thresholds move too
+  slowly to need their own task, and one morning note beats two pings.
 - The ratings data contains two rows with trail `TEST — delete me`
   (deploy verification). Always exclude them from analysis.
 
