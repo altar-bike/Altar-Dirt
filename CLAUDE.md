@@ -437,30 +437,38 @@ Three things this changes, in order of value:
   trial and then commercial pricing, which is quote-only. Tokens are
   managed at customer.synopticdata.com/credentials. Deprioritise.
 - **CoCoRaHS is already on the CLOUDS key** — `type=COCORAHS`. Volunteer
-  rain-gauge network; surveyed 4 Aug 2026. Nearest *active* observer to
-  each trail, with the date they last reported:
+  rain-gauge network. Surveyed 4 Aug 2026 using
+  `/soil/raw?...&compact=1&near=LAT,LON`. Nearest **currently-reporting**
+  observer per trail:
 
-  | Trail | Nearest CoCoRaHS | Verdict |
+  | Trail | Nearest reporting | Verdict |
   |---|---|---|
-  | Ride Kanuga | NC-HN-38 Etowah 1.1 WNW — 5.3 mi, 2,217ft, to 08-03 | **worth adding** — Kanuga has no gauge at all today |
-  | Hatley Pointe | NC-MS-28 Mars Hill 6.8 E — 10 mi, 2,753ft, to 08-03 | marginal; best that exists anywhere near it |
-  | Pisgah Proper | NC-TR-23 Pisgah Forest 2.5 N — 1.8 mi, to 08-03 | no gain; RAWS SMPN7 is 1.6 mi and hourly |
+  | Ride Kanuga | NC-HN-33 Hendersonville 5.1 WSW — **0.8 mi**, 2,184ft, to 08-02 | **best case on the list** — Kanuga has no gauge inside the page's 3.5 mi threshold |
+  | Pisgah Proper | NC-TR-23 Pisgah Forest 2.5 N — 1.8 mi, 2,528ft, to 08-03 | no gain; RAWS SMPN7 is 1.6 mi and hourly |
+  | Bent Creek | NC-BC-145 Avery Creek 0.9 ESE — 4.6 mi, 2,123ft, to 08-02 | usable; two closer observers have lapsed |
   | DuPont | NC-TR-16 Brevard 0.6 SSE — 6.4 mi, to 08-02 | no gain; Guion Farm is 1.9 mi and hourly |
-  | Bent Creek | NC-BC-163 Candler 1.9 ESE — 2.9 mi, to 07-30 | close but **lapsed** — see below |
-  | N Mills River | NC-BC-145 Avery Creek 0.9 ESE — 6 mi, to 08-02 | marginal |
+  | Hatley Pointe | NC-MS-19 Marshall 15.1 NNE — **7.2 mi**, 3,105ft, to 08-03 | best that exists near it, and the elevation suits the bike park |
+  | N Mills River | NC-HN-38 Etowah 1.1 WNW — 7.3 mi, to 08-03 | marginal |
+  | Wilson Creek | NC-CD-32 Patterson 1.6 SW — 10.2 mi, 1,371ft, to 08-03 | marginal |
 
-  **The catch is reliability, not distance.** These are volunteers, and
-  the `data_end` dates prove it: Bent Creek's closest observer at 2.9 mi
-  last reported 30 July, and the next at 4.1 mi stopped 27 July. Any
-  integration must pick *the most recent reporter within N miles*, never
-  simply the nearest, or a card will quietly show week-old rain.
+  **Always pick the most recent reporter, never the nearest.** These are
+  volunteers with a tube in the garden and they lapse. Kanuga's *closest*
+  observer, NC-HN-14 at 0.4 mi, is flagged `data_active = Yes` but has not
+  reported since 28 June. Bent Creek's closest two, at 2.9 and 4.1 mi,
+  stopped on 30 and 27 July. Selecting on distance alone would put
+  five-week-old rain on a card as though it were current.
 
-  Also **daily and manual**, not hourly — someone empties a tube each
-  morning. It cannot feed the hourly water balance directly; use it as a
-  daily total to cross-check the forecast, or spread it across the day.
+  Also **daily and manual**, so it cannot feed the hourly water balance —
+  use it as a daily total to cross-check, which is what the morning task
+  below does.
 
-  Net: only **Ride Kanuga** clearly gains, and Hatley Pointe marginally.
-  Pisgah and DuPont are already better served by hourly RAWS gauges.
+  **Never read CoCoRaHS metadata without `compact=1`.** One county exceeds
+  the response cap, and a truncated body fails `JSON.parse`. An earlier
+  survey here scoped queries by city to dodge the cap, hit it anyway, and
+  the catch block silently returned an empty list — so the results looked
+  complete but were built on partial data, and reported Kanuga's nearest
+  observer as 5.3 mi when it is 0.8 mi. If a station query comes back
+  empty or thin, check the response length before believing it.
 - **Crew-owned stations** — Tempest and Ambient Weather both have APIs.
   No soil moisture, but on-trail rain gauges from riders would beat
   forecast rain. Worth asking the crew.
