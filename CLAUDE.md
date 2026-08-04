@@ -37,27 +37,45 @@ them), one is real (Matt, Bent Creek, 4 Aug).
   mentioned below; the ratings CSV now comes from the service's
   `/export.csv?token=…` endpoint (Matt has the token; it's also in the
   Railway service variables).
-- **Railway does not auto-deploy on push.** The Railway GitHub app is not
-  installed on the altar-bike org, so Settings → Source shows the repo
-  outlined in red with "GitHub Repo not found" and no webhook ever
-  arrives. Pushing to GitHub ships `index.html` (Pages) but leaves the
-  feedback service on its old commit. Page-only changes never need a
-  Railway deploy; anything under `feedback-api/` does.
+- **Railway deploys on push (since 4 Aug 2026, late evening).** Matt
+  installed the Railway GitHub app on the altar-bike org and the service
+  source is connected to `altar-bike/Altar-Dirt`, branch `main`, root
+  `feedback-api`. Push to GitHub and the feedback service rebuilds
+  itself; verify with the Railway MCP's `list-deployments` that the
+  newest deployment's `commitHash` is your commit, then verify by
+  `/soil` payload as always. Page-only changes (`index.html`) ship via
+  Pages on the same push.
 
-  **Preferred path (since 4 Aug 2026): the Railway MCP.** Matt connected
-  Railway as an MCP server (authenticated as `gravelomatt`), which
-  replaces the browser ritual below. To ship a server change: push to
-  GitHub, then `set-variables` with `{"DEPLOY_NUDGE": "<commit sha>"}`
-  on the service — a variable change pulls GitHub HEAD and redeploys
-  (that's also what `DEPLOY_NUDGE` exists for; its value is just the sha
-  of the last nudge, read by nothing). Verify with `list-deployments`
-  that the new deployment's `commitHash` matches what you pushed, then
-  verify by `/soil` payload as always. `redeploy` alone is NOT enough —
-  it reuses the existing snapshot and does not pull new commits.
-  `get-logs` covers build/deploy/http streams when something crashes.
+  **The Eject trap, learned the hard way.** While converting from the
+  old template-mirror setup, clicking **Eject** did not simply detach —
+  it CREATED a brand-new GitHub repo (`altar-bike/Altar-Dirt-PtoK`, one
+  squashed "Initial commit") and pointed the service source at it. Two
+  deploys briefly ran from that stale copy before the source was
+  repointed via the Railway MCP's `railway-agent`. If the deploy list
+  ever shows `commitHash` = something not in `git log`, check
+  `get-service-config` → `source.repo` FIRST. The PtoK repo is orphaned
+  and should be deleted — that's Matt's call to make on GitHub, not
+  ours to script.
 
-  The browser procedure, kept as the fallback if the MCP is absent —
-  **the click order matters**:
+  **Staged changes can be lost to a racing deploy.** Railway stages
+  config edits until something applies them; a variable-triggered
+  deploy that starts in between applies the OLD config and silently
+  discards the staged source change (it happened here — the first
+  repoint vanished). When changing service config, apply it in the same
+  breath (`railway-agent` can `commitStagedChanges`), and read the
+  config back AFTER the next deploy, not before.
+
+  **Railway MCP tools** (connected, authenticated as `gravelomatt`):
+  `list-deployments` / `get-service-config` / `get-logs` for the truth,
+  `set-variables` to change env vars (note: triggers a deploy unless
+  `skipDeploys`), `railway-agent` for anything the direct tools can't
+  do (source changes, staged-change commits). `redeploy` reuses the
+  existing snapshot — it is NOT a way to ship a commit. `DEPLOY_NUDGE`
+  is a leftover from the pre-app era; it's read by nothing and can be
+  deleted whenever.
+
+  The old browser procedure, kept ONLY for archaeology (it applied to
+  the template-mirror setup that no longer exists):
   1. Push to GitHub first, and confirm it landed:
      `git -c http.proxy= -c https.proxy= ls-remote origin main`
      (the sandbox proxy blocks `api.github.com`, hence the `-c` flags).
