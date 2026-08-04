@@ -587,7 +587,7 @@ window.ALTAR_SETTINGS = {
        wins; forecast fills every hour it didn't measure, and all future
        hours, because you cannot measure the future. If the station drops
        out the page silently reverts to forecast. */
-    var gauge = nearestWx(t);
+    var gauge = nearestWx(t, WX_MAX_MI);
     var precip = [], gHours = 0, gSum = 0, fSum = 0;
     for (i = 0; i < times.length; i++) {
       var fcast = h.precipitation[i] || 0, use = fcast;
@@ -615,6 +615,24 @@ window.ALTAR_SETTINGS = {
       name: gauge.s.name, mi: gauge.mi, hours: gHours,
       measured: gSum, forecast: fSum, et24: et24
     } : null;
+
+    /* No gauge close enough to trust? Look further out purely to warn.
+       Compares the last 24h measured there against the forecast here,
+       and only speaks up when they disagree enough to matter. */
+    var rainWatch = null;
+    if (!gauge) {
+      var w = nearestWx(t, WX_WATCH_MI);
+      if (w) {
+        var wm = 0, wf = 0, wn = 0;
+        for (i = Math.max(0, nowIdx - 23); i <= nowIdx; i++) {
+          var wr = w.s.hours[times[i].slice(0, 13)];
+          if (wr && wr.p != null) { wm += wr.p; wf += h.precipitation[i] || 0; wn++; }
+        }
+        if (wn >= 6 && wm - wf >= 0.2) {
+          rainWatch = { name: w.s.name, mi: w.mi, measured: wm, forecast: wf, hours: wn };
+        }
+      }
+    }
 
     var rates = [];
     for (i = 0; i < times.length; i++) rates.push(dryingRate(h, i, dryMult));
@@ -803,7 +821,7 @@ window.ALTAR_SETTINGS = {
 
     return {
       now: nowEval, today: today, best: best, outlook: outlook,
-      recovery: recovery, waterNow: water[nowIdx], rainSource: rainSource,
+      recovery: recovery, waterNow: water[nowIdx], rainSource: rainSource, rainWatch: rainWatch,
       hasSoil: hasSoil, nowIdx: nowIdx,
       p24: sumPrecip(precip, nowIdx, 24),
       p72: sumPrecip(precip, nowIdx, 72),
@@ -967,13 +985,23 @@ window.ALTAR_SETTINGS = {
      past about three miles the gauge stops speaking for the trail. */
   var WX_MAX_MI = 3.5;
 
-  function nearestWx(t) {
+  /* Second tier. Between these two distances a gauge is not trusted to
+     replace the forecast — in scattered summer convection it can rain
+     hard six miles away and not at all on the trail — but it is still
+     evidence, and a rider deserves to hear about it. So it warns and
+     leaves the score alone. This tier exists because Bent Creek showed
+     hero dirt through 0.92 in of rain with nothing inside 3.5 mi to say
+     otherwise; falling all the way back to forecast is worse than
+     hearing that it poured a few miles away. */
+  var WX_WATCH_MI = 10;
+
+  function nearestWx(t, maxMi) {
     if (!EXTRA.wx) return null;
     var best = null;
     EXTRA.wx.forEach(function (s) {
       if (s.lat == null || s.lon == null || !s.hours) return;
       var mi = milesBetween(t.lat, t.lon, s.lat, s.lon);
-      if (mi > WX_MAX_MI) return;
+      if (mi > maxMi) return;
       if (!best || mi < best.mi) best = { s: s, mi: mi };
     });
     return best;
@@ -1193,6 +1221,14 @@ window.ALTAR_SETTINGS = {
         esc(rs.name) + " · " + rs.mi.toFixed(1) + " mi — " + esc(bits2.join(", ")) + "</span></li>";
     }
 
+    var rw = m && m.rainWatch;
+    if (rw) {
+      rows += '<li><span class="da-w" style="color:#B85C2A">rain?</span><span>' +
+        esc(rw.name) + " · " + rw.mi.toFixed(0) + " mi — " + rw.measured.toFixed(2) +
+        '" measured in 24h, forecast here said ' + rw.forecast.toFixed(2) +
+        '". Too far off to score from.</span></li>';
+    }
+
     var st = nearestStation(t);
     if (st) {
       var s = st.s, p = [];
@@ -1210,6 +1246,13 @@ window.ALTAR_SETTINGS = {
     if (!rows) return "";
 
     var says = [];
+    if (rw) {
+      says.push("No gauge close enough to score from here, but " + esc(rw.name) + " " +
+        rw.mi.toFixed(0) + " miles off caught " + rw.measured.toFixed(2) +
+        '" in the last day against ' + rw.forecast.toFixed(2) +
+        '" forecast here. Scattered rain, so it may have missed this trail entirely — ' +
+        "or the score may be reading drier than the dirt.");
+    }
     if (rs && rs.hours >= 6) {
       var g = rs.measured - rs.forecast;
       if (g >= 0.1) says.push("The gauge caught " + g.toFixed(2) +

@@ -153,10 +153,16 @@ const SOIL_VARS = ["soilmoist", "soilmoist20cm", "soiltemp"];
    and on 3 Aug 2026 it caught 0.92 in over four hours that the forecast
    had as 0.00. Bent Creek had no gauge inside the threshold and showed
    hero dirt on a trail that had just taken an inch of rain. That is the
-   reason this line includes USCRN. */
+   reason this line includes USCRN.
+
+   ECONet is in here for the same reason — it reports `precip` as well as
+   soil, and on the afternoon of 4 Aug 2026 UNCA read 0.21 in while the
+   gauges nearest Pisgah and Mills River read 0.01 and 0.00. Three
+   networks, one query; a rain gauge is a rain gauge. */
 const CLOUDS_WX_LOC = process.env.CLOUDS_WX_LOC ||
-  "type=RAWS,USCRN;county=Transylvania County,Henderson County,Buncombe County," +
-  "Haywood County,Madison County,Burke County,Caldwell County,Yancey County,McDowell County";
+  "type=RAWS,USCRN,ECONET;county=Transylvania County,Henderson County,Buncombe County," +
+  "Haywood County,Madison County,Burke County,Caldwell County,Yancey County,McDowell County," +
+  "Polk County,Avery County,Watauga County,Mitchell County,Rutherford County";
 const WX_VARS = ["precip", "evaptrans_pm"];
 
 const SOIL_TTL = 20 * 60 * 1000;   // both networks publish hourly
