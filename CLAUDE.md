@@ -529,6 +529,16 @@ coordinates (so it cannot be matched to a trail) or when a whole network
 query throws. Absent or empty `dropped` plus a plausible `wx.length` is
 the check to run after any change to `CLOUDS_LOC` or `CLOUDS_WX_LOC`. As
 of 4 Aug 2026 it has never been non-empty.
+
+**Cold `/soil` is slow; warm `/soil` is not.** The payload now costs five
+upstream CLOUDS calls (three soil networks split by `locVariants`, the
+rain feed, plus CoCoRaHS) so the first request after a deploy can take
+long enough to time out a client — it did twice on 4 Aug. Once
+`soilCache` fills it serves in ~10ms and the page paints measured scores
+about a second after load, with no visible forecast-only flash. So don't
+diagnose a slow `/soil` right after shipping: request it once to warm
+it, then measure. If it ever needs fixing properly, warm the cache on
+boot rather than making the first visitor pay.
 **Station matching: closest wins, ties break downhill.** Matt's call
 (3 Aug 2026). Distance decides it; where two stations are within
 `STATION_TIE_MI` (2 miles) of each other they count as equally near and
