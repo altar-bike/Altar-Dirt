@@ -276,18 +276,21 @@ async function cloudsJson(url) {
   catch (e) { throw new Error("CLOUDS returned non-JSON (" + text.slice(0, 80) + ")"); }
 }
 
-/* CLOUDS caps a large response by dropping stations off the end of its
-   id ordering, and it does it silently — valid JSON, just short. Widening
-   the rain query to three networks and fourteen counties on 4 Aug 2026 cut
-   it off after NCVN7, which quietly took away SMPN7 and POPN7: the gauge
-   1.6 mi from Pisgah and the one nearest Wilson Creek. The payload looked
-   healthy the whole time.
+/* Split `type=A,B,C` into one request per network and merge, keeping the
+   rest of the selector as it is.
 
-   So never send one query spanning several networks. Split `type=A,B,C`
-   into one request per network and merge — three responses the size of
-   the one that used to work. Everything else in the selector is kept as
-   it is. If a single network alone ever grows past the cap this needs
-   splitting by county too, which is why droppedIds() below exists. */
+   Honest history: this was written to fix a CLOUDS response cap that does
+   not exist. On 4 Aug 2026 the widened three-network rain query looked
+   like it was being truncated after NCVN7, losing SMPN7 (1.6 mi from
+   Pisgah). The payload was in fact complete — the tool being used to read
+   it was cutting the JSON at ~40 KB. See CLAUDE.md.
+
+   It is kept because it earns its place for a different reason: one
+   network being down or slow no longer costs us the other two. That is
+   worth three cheap requests every twenty minutes. It is NOT a truncation
+   guard, and nothing here should be taken as evidence CLOUDS truncates.
+   `dropped` on the /soil payload is the actual guard, and as of writing
+   it has never been non-empty. */
 function locVariants(loc) {
   const parts = String(loc).split(";");
   const ix = parts.findIndex((p) => /^\s*type=/i.test(p));
@@ -357,8 +360,9 @@ async function wxSeries(dropped) {
       }
       if (!n) continue;
       const m = meta[id] || {};
-      /* Readings but no coordinates means the metadata response was cut
-         short — the station is real and we cannot place it. Say so. */
+      /* Readings but no coordinates: the station is real and we cannot
+         place it, so it cannot be matched to a trail. Silently dropping
+         it is how a missing gauge looks like no rain. Say so instead. */
       if (m.lat == null || m.lon == null) { if (dropped) dropped.push(id + ":nocoords"); continue; }
       seen[id] = 1;
       out.push({ id: id, name: m.name || id, lat: m.lat, lon: m.lon, elev: m.elev == null ? null : m.elev, hours: hours });
@@ -371,9 +375,8 @@ async function soilPayload() {
   if (soilCache.payload && Date.now() - soilCache.at < SOIL_TTL) return soilCache.payload;
   if (!CLOUDS_HASH) return { stations: [], wx: [], note: "CLOUDS_HASH not set" };
 
-  /* Same one-network-per-query rule as the rain feed, for the same
-     reason: a statewide two-network soil query is already close to the
-     size where CLOUDS starts trimming the tail. */
+  /* One network per query, same as the rain feed: USCRN being slow
+     should not take ECONet's readings down with it. */
   const data = {}, meta = {}, dropped = [];
   for (const loc of locVariants(CLOUDS_LOC)) {
     try {

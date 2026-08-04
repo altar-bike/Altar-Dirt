@@ -27,17 +27,41 @@ Hosted on **GitHub Pages** from this repo. Linked from the Shopify nav at altar.
   mentioned below; the ratings CSV now comes from the service's
   `/export.csv?token=…` endpoint (Matt has the token; it's also in the
   Railway service variables).
-- **Railway deploys from a mirror** of the public repo (the Railway GitHub
-  app is not installed on the altar-bike org). Pushing to GitHub does NOT
-  auto-redeploy the feedback service. To ship a server change: Railway →
-  service → **Settings → Upstream Repo → Check for updates**, wait for
-  "New version of the upstream repo available!" to appear (it lags the
-  push by a minute or two and the first click often reports nothing),
-  then **Update → Yes**. Verify with `/health` afterwards. Page-only
-  changes (`index.html`) never need a Railway redeploy.
-  Installing the Railway GitHub app on the altar-bike org would remove
-  this step entirely — worth doing if server changes get frequent.
-  Needs Matt; it's a permission grant on his org.
+- **Railway does not auto-deploy on push.** The Railway GitHub app is not
+  installed on the altar-bike org, so Settings → Source shows the repo
+  outlined in red with "GitHub Repo not found" and no webhook ever
+  arrives. Pushing to GitHub ships `index.html` (Pages) but leaves the
+  feedback service on its old commit. Page-only changes never need a
+  Railway deploy; anything under `feedback-api/` does.
+
+  To ship a server change — **the click order matters**:
+  1. Push to GitHub first, and confirm it landed:
+     `git -c http.proxy= -c https.proxy= ls-remote origin main`
+     (the sandbox proxy blocks `api.github.com`, hence the `-c` flags).
+  2. Railway → service → **Settings → Upstream Repo → Check for
+     updates**. The first click almost always reports "You're on the
+     latest version of this repository" even when it is not — that
+     message is stale, not an answer. Ignore it.
+  3. Go to the **Deployments** tab. Within a couple of minutes an
+     **"Update available"** badge appears at the top left of the canvas.
+     Click it → **Yes**. The build starts ~2–5 minutes later.
+  4. Verify by reading the deployment title on the Deployments tab and
+     matching it against the commit subject. Then verify by *payload* —
+     `/soil` in the browser, not `/health`, which returns ok on any
+     version. A click appearing to succeed proves nothing; a stale
+     accessibility ref once made an Update click silently miss.
+
+  A **service variable change also pulls the latest commit.** Editing any
+  variable and hitting **Deploy** rebuilds from GitHub HEAD, so it is both
+  a working fallback when the Update badge will not appear and a trap:
+  a variable tweak can quietly ship every unshipped commit with it. On
+  4 Aug 2026 setting `CLOUDS_WX_LOC` shipped the ECONet commit as a side
+  effect. Never assume a variable change is isolated — check what commit
+  went out with it.
+
+  Installing the Railway GitHub app on the altar-bike org removes all of
+  this. **Needs Matt** — it's a permission grant on his org, and it is now
+  the single highest-leverage chore on the list.
 - **Daily morning update** runs as a scheduled Claude task, ~6:47am ET
   every day (`trig_012nabCYGc56b1bwQwcjKUxg`). Push only, no email —
   Matt's call: he does not want a notification per rating, this note
@@ -389,31 +413,45 @@ CLOUDS also sends no CORS headers, so a proxy is required regardless.
 - Endpoint is `api.climate.ncsu.edu/data.php`; variables are
   `soilmoist`, `soilmoist20cm` (m³/m³) and `soiltemp` (°F).
 
-**Never send one CLOUDS query spanning several networks.** CLOUDS caps a
-large response by dropping stations off the end of its id ordering, and
-it does it silently: valid JSON, parses fine, just short. On 4 Aug 2026
-widening the rain query to `type=RAWS,USCRN,ECONET` across fourteen
-counties came back cut off after `NCVN7` — which quietly removed
-`SMPN7`, the gauge 1.6 miles from Pisgah and the most valuable one in
-the whole set, along with `POPN7`. Nothing errored. The payload looked
-bigger and healthier than before while having lost the two stations that
-mattered most.
+**Never inspect `/soil` through `WebFetch`.** It is ~70 KB and WebFetch
+silently truncates it, so what comes back is a well-formed-looking
+*prefix* of the payload. Read it in the browser instead, on the live page
+tab, and compute the summary in the page:
 
-`locVariants()` in `server.js` now splits any `type=A,B,C` selector into
-one request per network and merges the results, for both the soil and the
-rain feed. If a single network alone ever outgrows the cap this needs
-splitting by county too — which is what `dropped` is for. `/soil` carries
-a `dropped` array whenever a station had readings but no coordinates (the
-sign of a truncated *metadata* response) or a whole network query failed.
-An empty or absent `dropped` is the only evidence that a payload is
-complete; station count alone is not, because truncation looks like
-growth. Check it after any change to `CLOUDS_LOC` or `CLOUDS_WX_LOC`.
+```js
+const j = await (await fetch(ENDPOINT + "/soil?probe=" + Math.random())).json();
+({ wxCount: j.wx.length, wxIds: j.wx.map(w => w.id).sort(),
+   stationCount: j.stations.length, dropped: j.dropped || null })
+```
 
-The transferable version: **an upstream that truncates instead of
-erroring cannot be verified by looking at what arrived.** Ask what should
-have arrived and is missing. Both times this bit — the CoCoRaHS survey
-and this one — the response was well-formed and the conclusion drawn
-from it was wrong.
+This cost an hour on 4 Aug 2026 and produced a confidently wrong
+diagnosis. After widening the rain query to `type=RAWS,USCRN,ECONET`
+across fourteen counties, WebFetch showed 17 stations ending at `NCVN7`,
+with `SMPN7` — the gauge 1.6 miles from Pisgah, the most valuable one in
+the set — missing. The alphabetical cutoff made it look exactly like an
+upstream response cap, and it was written up as one. The payload was
+complete: 24 rain gauges, 48 soil stations, `SMPN7` present the whole
+time. **CLOUDS was not truncating anything. There is no known CLOUDS
+response cap.** Do not repeat that claim without evidence from a full
+payload read.
+
+The transferable version: **when a reading is missing, rule out the
+instrument before concluding something about the thing measured.** The
+CoCoRaHS survey failed this way too — but there the cap was real and
+upstream, which is exactly why the same shape of evidence pointed the
+wrong way the second time. A truncated view and a truncated source look
+identical from the truncated end.
+
+`locVariants()` in `server.js` splits any `type=A,B,C` selector into one
+request per network and merges, for both feeds. It was written for the
+imaginary cap and is kept for a real reason: one network being down or
+slow no longer takes the others with it. It is not a truncation guard.
+
+`/soil` carries a `dropped` array when a station has readings but no
+coordinates (so it cannot be matched to a trail) or when a whole network
+query throws. Absent or empty `dropped` plus a plausible `wx.length` is
+the check to run after any change to `CLOUDS_LOC` or `CLOUDS_WX_LOC`. As
+of 4 Aug 2026 it has never been non-empty.
 **Station matching: closest wins, ties break downhill.** Matt's call
 (3 Aug 2026). Distance decides it; where two stations are within
 `STATION_TIE_MI` (2 miles) of each other they count as equally near and
