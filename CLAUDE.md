@@ -644,6 +644,22 @@ After regenerating, verify the file contains **zero** `{{` and no `%}` outside t
   the score — only once there's calibration data to justify it
 - Any soil or exposure correction — he's ridden them, you haven't
 - Anything that spends money or changes a live customer-facing page
+- **Whether one extreme hour from one gauge should be allowed to carry a
+  score on its own.** At 17:00 on 4 Aug 2026 SMPN7 reported 1.22 inches
+  in a single hour and took Pisgah Proper from the high 80s to 38. The
+  reading is probably real — RUTN7 caught 0.43 and MAHN7 0.11 in the same
+  hour, UNCA 0.33 the hour before, so there was genuine convection across
+  the region — but DARN7, 4.6 miles away, caught 0.00, and Davidson River
+  1.4 miles away was still flat at 44 cfs through the last USGS reading.
+  Nothing corroborated it at the moment the score moved. A stuck tipping
+  bucket dumping its backlog into one hour looks identical to a cloudburst
+  from inside the data.
+  Options: cap a single hour's contribution, require a second gauge or a
+  creek rise before an extreme hour counts fully, or leave it and accept
+  that the failure is in the safe direction (too wet, not too dry). The
+  third is defensible and is the current behaviour. Don't change scoring
+  on this without Matt — and note the Bent Creek fix was trustworthy
+  precisely *because* Hominy Creek confirmed it independently.
 
 ## Report honestly
 
