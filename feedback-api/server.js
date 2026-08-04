@@ -181,6 +181,14 @@ function numOf(v) {
 
 const isId = (k) => /^[A-Z0-9]{3,6}$/.test(k);
 
+function milesBetween(a, b, c, d) {
+  const R = 3959, rad = (x) => x * Math.PI / 180;
+  const dLa = rad(c - a), dLo = rad(d - b);
+  const h = Math.sin(dLa / 2) ** 2 +
+            Math.cos(rad(a)) * Math.cos(rad(c)) * Math.sin(dLo / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
 /* CLOUDS wraps every field as { name: "<human label>", value: <actual> },
    so almost nothing is a bare scalar. Unwrap before reading anything. */
 function unwrap(v) {
@@ -418,7 +426,42 @@ const server = http.createServer(function (req, res) {
     const section = url.searchParams.get("section");
     (CLOUDS_HASH ? cloudsJson(cloudsUrl(which)) : Promise.reject(new Error("CLOUDS_HASH not set")))
       .then(function (j) {
-        let s = JSON.stringify(section && j[section] !== undefined ? j[section] : j).slice(0, 20000);
+        /* compact=1 flattens a station-metadata response to one small
+           row per station. CLOUDS wraps every field in a {name,value}
+           envelope, so a single county of CoCoRaHS metadata runs past
+           100KB raw — far too big to eyeball. Add near=lat,lon to sort
+           by distance and the answer fits in a couple of lines. */
+        if (url.searchParams.get("compact")) {
+          const loc = (j.metadata && j.metadata.location) || j.location || {};
+          const g = (s, k) => (s[k] && s[k].value !== undefined ? s[k].value : null);
+          let rows = Object.keys(loc).map(function (id) {
+            const s = loc[id] || {};
+            return {
+              id: id, name: g(s, "name"), county: g(s, "county"),
+              active: g(s, "data_active"), end: g(s, "data_end") || g(s, "date_end"),
+              lat: numOf(g(s, "lat")), lon: numOf(g(s, "lon")), elev: numOf(g(s, "elev"))
+            };
+          }).filter((r) => r.lat != null && r.lon != null);
+
+          if (url.searchParams.get("activeonly") !== "0") {
+            rows = rows.filter((r) => String(r.active).toLowerCase() !== "no");
+          }
+          const near = url.searchParams.get("near");
+          if (near) {
+            const parts = String(near).split(",").map(Number);
+            if (parts.length === 2 && parts.every((n) => !isNaN(n))) {
+              rows.forEach(function (r) {
+                r.mi = Math.round(milesBetween(parts[0], parts[1], r.lat, r.lon) * 10) / 10;
+              });
+              rows.sort((a, b) => a.mi - b.mi);
+            }
+          }
+          const limit = Math.min(parseInt(url.searchParams.get("limit") || "20", 10) || 20, 300);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ total: rows.length, stations: rows.slice(0, limit) }));
+        }
+
+        let s = JSON.stringify(section && j[section] !== undefined ? j[section] : j).slice(0, 200000);
         if (CLOUDS_HASH) s = s.split(CLOUDS_HASH).join("[redacted]");
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(s);
