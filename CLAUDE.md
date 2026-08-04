@@ -44,7 +44,20 @@ them), one is real (Matt, Bent Creek, 4 Aug).
   feedback service on its old commit. Page-only changes never need a
   Railway deploy; anything under `feedback-api/` does.
 
-  To ship a server change — **the click order matters**:
+  **Preferred path (since 4 Aug 2026): the Railway MCP.** Matt connected
+  Railway as an MCP server (authenticated as `gravelomatt`), which
+  replaces the browser ritual below. To ship a server change: push to
+  GitHub, then `set-variables` with `{"DEPLOY_NUDGE": "<commit sha>"}`
+  on the service — a variable change pulls GitHub HEAD and redeploys
+  (that's also what `DEPLOY_NUDGE` exists for; its value is just the sha
+  of the last nudge, read by nothing). Verify with `list-deployments`
+  that the new deployment's `commitHash` matches what you pushed, then
+  verify by `/soil` payload as always. `redeploy` alone is NOT enough —
+  it reuses the existing snapshot and does not pull new commits.
+  `get-logs` covers build/deploy/http streams when something crashes.
+
+  The browser procedure, kept as the fallback if the MCP is absent —
+  **the click order matters**:
   1. Push to GitHub first, and confirm it landed:
      `git -c http.proxy= -c https.proxy= ls-remote origin main`
      (the sandbox proxy blocks `api.github.com`, hence the `-c` flags).
