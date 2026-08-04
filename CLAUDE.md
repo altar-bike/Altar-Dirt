@@ -274,6 +274,16 @@ downhill. With USCRN in the pool, **Bent Creek now reads from Asheville
 `CLOUDS_LOC` and `CLOUDS_WX_LOC` env vars control which networks and
 counties are queried, if the sensor set needs widening.
 
+**Verified live, 4 Aug 2026.** Bent Creek reads USCRN Asheville 8 SSW at
+1 mi (24% water, against FLET's 44% six miles out). Pisgah Proper's
+gauge measured 0.98" over 72h where the forecast had 0.50"; DuPont's
+measured 0.73" against 0.28" forecast. The forecast was under-reporting
+rain by roughly half at both — that gap is the justification for the
+whole exercise, and it is worth re-checking after each storm. Eight
+RAWS gauges are in range statewide but only Pisgah and DuPont fall
+inside `WX_MAX_MI`; Ride Kanuga's nearest is Guion Farm at 6.1 mi and
+correctly gets none.
+
 **Why measured data doesn't change the score.** Creek level and station
 soil moisture are better signals than the model in principle, but
 weighting them is a calibration decision — it needs rider ratings and
