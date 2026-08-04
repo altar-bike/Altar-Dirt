@@ -14,7 +14,17 @@ A single static HTML page that scores mountain bike trail rideability from weath
 
 Hosted on **GitHub Pages** from this repo. Linked from the Shopify nav at altar.bike.
 
-## Deployed state (as of 2026-08-03)
+## Deployed state (as of 2026-08-04 evening)
+
+Ten cards: eight local (Pisgah split Lower/Upper) + two `away`. The
+whole local list loads in ONE Open-Meteo request. `/soil` now carries
+three blocks: `stations` (soil), `wx` (hourly rain gauges), `coco`
+(volunteer daily rain, cross-check only, `rain·d` row on trails with no
+scoring gauge). Ratings payload is v3 — carries `rain_source`,
+`rain_measured`/`rain_forecast`, `et_24h`, `rain_watch_gap` so a rating
+can separate "model wrong" from "input wrong". The first three CSV rows
+predate v3: two are deploy-test rows named "TEST — delete me" (filter
+them), one is real (Matt, Bent Creek, 4 Aug).
 
 - **Repo:** `altar-bike/Altar-Dirt` (public — Pages requires it). A `.nojekyll`
   file at root is required; Jekyll chokes on the Liquid examples in this file.
@@ -181,14 +191,50 @@ Search by string, never by line number — line numbers move.
   which answers "where do I ride today" rather than "where could I
   drive". Once asked for it joins the Refresh cycle, and if it's in the
   cache from a previous visit it shows without asking again.
-  This exists to keep load time and Open-Meteo call volume down: nine
-  trails is nine calls per visitor, and the list is growing. Anything
-  out of state should get `away: true` unless Matt says otherwise.
+  This exists to keep the page honest about trips nobody is taking.
+  Since 4 Aug 2026 the whole local list is ONE Open-Meteo request
+  (comma-separated coordinates; the answer is an array in trail order,
+  or a bare object for a single coordinate — `loadBatch()` handles
+  both). Adding a trail no longer adds a request, but `away: true`
+  still applies to anything out of state unless Matt says otherwise.
 - Coordinates should point at **where people actually ride**, not the parking lot at the bottom. A trailhead 500ft up gives materially different numbers than the valley floor.
 
-**Known weak point:** `Pisgah Proper` is pinned at the Davidson River ranger station (~2,200ft) while the riding — Black Mountain, Clawhammer, Bennett Gap — sits well above it. That card runs optimistic for the high country. If Matt raises it, the fix is splitting into two entries at different elevations.
+**Resolved 4 Aug 2026:** Pisgah is split into `Pisgah — Lower` (Ranger
+Station, 35.2848,-82.7270 from OSM, pinned FLET, Matt's call on the
+valley) and `Pisgah — Upper` (Pisgah Inn, 35.4029,-82.7538 from OSM,
+BRP mp 408.6). Upper's exposure is `mixed` — **my ridgeline guess, not
+Matt's; ask him.** FRYI (5,320ft) sits 1.3 mi from the Inn and carries
+an hourly rain gauge, so Upper scores from measured high-country rain
+naturally, no pin needed.
 
 Never guess a coordinate. Look it up and say where you got it.
+
+### New spots waiting on Matt (soil + exposure), gauges pre-scouted
+
+Matt named ~15 additions on 4 Aug and said he'd give soil/exposure per
+spot; none are in `TRAILS` until he does. Creek gauges surveyed 4 Aug
+2026 from the USGS active-IV site inventory (browser query, bBox per
+spot) so each trail lands with its gauge already known:
+
+| Spot | Best gauge | Dist | Note |
+|---|---|---|---|
+| Jarrod's Place (GA) | 02398000 Chattooga R at Summerville | 1.1 mi | excellent; away:true |
+| Berm Park (Canton) | 03456991 Pigeon R nr Canton | 1.7 mi | |
+| Beech Mountain | 0347927162 Buckeye Cr abv Buckeye Lk | 1.2 mi | below-lake twin 0347927164 exists; use above-lake, unregulated |
+| Ride Rock Creek (Zirconia) | 021623957 Big Falls Cr nr Tigerville SC | 3.9 mi | over the state line, same escarpment |
+| Stony Fork (Candler) | 0344878100 Hominy Cr | 6.0 mi | already in GAUGES — Stony Fork drains to Hominy, right watershed |
+| Mt Mitchell | 03463300 South Toe R nr Celo | 6.5 mi | right side of the mountain |
+| Sugar Mountain | 0347927162 Buckeye Cr | 6.4 mi | marginal |
+| WildSide (Pigeon Forge) | 03469251 W Prong Little Pigeon nr Gatlinburg | 6.3 mi | away:true |
+| Old Fort | 02137727 Catawba R nr Pleasant Gardens | 7.8 mi | marginal; town coords — riding is ~2,700ft, needs a better point from Matt |
+| Big Ivy (Barnardsville) | 03453000 Ivy R nr Marshall | 9.2 mi | Beetree Cr is closer at 8.2 but drains the WRONG side of the ridge; Big Ivy drains via Dillingham Cr to the Ivy. Watershed beats distance. |
+
+Green River Game Lands, Bent Creek Gap, Mills River Valley Overlook,
+Beacon Park: run the same bBox query when their coordinates are settled
+(GRGL's is presumably the Green River itself — verify there's an active
+IV gauge). Monthly `med` tables need computing from USGS day-of-year
+medians per the existing GAUGES pattern before any of these show
+"% of normal".
 
 ---
 
@@ -549,7 +595,10 @@ Three things this changes, in order of value:
   entities, so Altar does not qualify. Remaining options are a 14-day
   trial and then commercial pricing, which is quote-only. Tokens are
   managed at customer.synopticdata.com/credentials. Deprioritise.
-- **CoCoRaHS is already on the CLOUDS key** — `type=COCORAHS`. Volunteer
+- **CoCoRaHS — WIRED IN 4 Aug 2026** (`cocoSeries()` in server.js →
+  `coco` block on `/soil` → `rain·d` row via `nearestCoco()`; freshest
+  reporter wins, then nearest; "T" = trace = 0.005; display-only,
+  never scores). The survey below is what justified it. — `type=COCORAHS`. Volunteer
   rain-gauge network. Surveyed 4 Aug 2026 using
   `/soil/raw?...&compact=1&near=LAT,LON`. Nearest **currently-reporting**
   observer per trail:

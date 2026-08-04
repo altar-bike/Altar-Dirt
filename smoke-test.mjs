@@ -64,8 +64,19 @@ const problems = [];
 page.on("pageerror", (e) => problems.push("pageerror: " + e.message));
 page.on("console", (m) => { if (m.type() === "error" && !/ERR_|Failed to load resource/.test(m.text())) problems.push("console: " + m.text()); });
 
-await page.route("**://api.open-meteo.com/**", (r) =>
-  r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(forecast) }));
+/* The page now sends every trail in ONE request (comma-separated
+   coordinates) and Open-Meteo answers with an array in the same order —
+   or a bare object for a single coordinate (the retry path). The stub
+   mirrors both shapes, so a regression back to per-trail calls shows up
+   here as a card count mismatch. */
+await page.route("**://api.open-meteo.com/**", (r) => {
+  const u = new URL(r.request().url());
+  const n = (u.searchParams.get("latitude") || "").split(",").filter(Boolean).length;
+  const body = n > 1
+    ? JSON.stringify(Array.from({ length: n }, () => forecast))
+    : JSON.stringify(forecast);
+  r.fulfill({ status: 200, contentType: "application/json", body });
+});
 await page.route("**://api.weather.gov/**", (r) =>
   r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ features: [] }) }));
 await page.route("**://waterservices.usgs.gov/**", (r) =>
@@ -82,7 +93,13 @@ const soilPayload = {
   stations: [{ id: "TEST", name: "Test Soil Station", lat: 35.4950, lon: -82.6300,
                elev: 2100, soilmoist: 0.31, soilmoist20cm: 0.31, soiltemp: 68, at: iso(NOW) }],
   wx: [{ id: "TESTG", name: "Test Rain Gauge", lat: 35.4950, lon: -82.6300,
-         elev: 2100, hours: gaugeHours }]
+         elev: 2100, hours: gaugeHours }],
+  /* A volunteer daily observer 1 mi from Ride Kanuga, dated with the
+     REAL clock — the page's freshness cutoff runs on Date.now(), not
+     the synthetic timeline. Kanuga has no hourly gauge in this stub,
+     so the daily row is its only measured rain. */
+  coco: [{ id: "NC-HN-33", name: "Hendersonville 5.1 WSW", lat: 35.2810, lon: -82.5450,
+           elev: 2184, date: new Date().toISOString().slice(0, 10), precip: 0.31 }]
 };
 await page.route("**://altar-dirt-production.up.railway.app/**", (r) =>
   r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(soilPayload) }));
@@ -117,6 +134,8 @@ if (after.awayScored === 0) problems.push("away trails did not load on click");
 
 const r = await page.evaluate(() => {
   const cards = [...document.querySelectorAll(".da-card")];
+  const rowsOf = (c) => [...(c?.querySelectorAll(".da-measured-in li") || [])]
+    .map((l) => l.textContent.replace(/\s+/g, " ").trim());
   return {
     cards: cards.length,
     errors: [...document.querySelectorAll(".da-err")].map((e) => e.textContent),
@@ -124,8 +143,11 @@ const r = await page.evaluate(() => {
     scores: cards.map((c) => c.querySelector(".da-score")?.textContent ?? null),
     windows: cards.map((c) => c.querySelector(".da-window")?.textContent.trim()),
     drivers: [...(cards[0]?.querySelectorAll(".da-why li") || [])].map((l) => l.textContent.replace(/\s+/g, " ").trim()),
-    measured: [...(cards[0]?.querySelectorAll(".da-measured-in li") || [])].map((l) => l.textContent.replace(/\s+/g, " ").trim()),
-    meaning: cards[0]?.querySelector(".da-meaning")?.textContent.replace(/\s+/g, " ").trim() || null
+    measured: rowsOf(cards[0]),
+    meaning: cards[0]?.querySelector(".da-meaning")?.textContent.replace(/\s+/g, " ").trim() || null,
+    outlookRows: cards[0]?.querySelectorAll(".da-orow").length ?? 0,
+    millsRows: rowsOf(cards[1]),     /* North Mills River — tier-2 territory */
+    kanugaRows: rowsOf(cards[5])     /* Ride Kanuga — volunteer daily gauge */
   };
 });
 await browser.close();
@@ -135,8 +157,22 @@ await browser.close();
 if (!r.measured.some((l) => l.startsWith("rain"))) problems.push("measured rain row missing on Bent Creek");
 if (!/gauge caught/.test(r.meaning || "")) problems.push("gauge-vs-forecast sentence missing");
 
+/* The same stub gauge sits 5.4 mi from North Mills River — outside the
+   scoring threshold, inside the watch tier. The rain? warning is the
+   only defence a gauge-less trail has against a forecast miss, so its
+   absence is a failure, not a cosmetic difference. */
+if (!r.millsRows.some((l) => /rain\?/.test(l) && /Too far off to score from/.test(l)))
+  problems.push("tier-2 rain? warning missing on North Mills River");
+
+/* Kanuga's only measured rain is the volunteer daily observer. */
+if (!r.kanugaRows.some((l) => /rain·d/.test(l) && /volunteer daily gauge/.test(l)))
+  problems.push("CoCoRaHS daily row missing on Ride Kanuga");
+
+/* Five-day outlook, one row per day. */
+if (r.outlookRows !== 5) problems.push("expected 5 outlook rows, got " + r.outlookRows);
+
 if (r.errors.length) problems.push("cards showing an error: " + r.errors[0]);
-if (r.cards !== 9) problems.push("expected 9 cards, got " + r.cards);
+if (r.cards !== 10) problems.push("expected 10 cards, got " + r.cards);
 if (r.scores.some((s) => s === null)) problems.push("a card rendered no score");
 
 console.log("local   :", before.localScored, "scored on load; away:", before.awayScored,
@@ -149,4 +185,4 @@ console.log("measured:", r.measured.join("  |  "));
 console.log("meaning :", r.meaning);
 
 if (problems.length) { console.error("\nFAIL\n" + problems.join("\n")); process.exit(1); }
-console.log("\nPASS — 9 cards, no JS errors");
+console.log("\nPASS — " + r.cards + " cards, no JS errors");

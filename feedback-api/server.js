@@ -47,6 +47,11 @@ const FIELDS = [
   "soil_moisture", "soil_temp_f", "air_temp_f",
   "rain_24h", "rain_72h", "hours_since_rain", "water_in", "dries_out",
   "wet_mult", "dry_mult", "model_time", "tz_offset_min",
+  /* v3: which rain fed the water balance and how far off the forecast
+     was — the columns the ET/decay calibration will fit against. Old
+     rows read back as empty cells here, which is the truth of them. */
+  "rain_source", "rain_source_mi", "rain_measured", "rain_forecast",
+  "et_24h", "rain_watch_gap",
   "lat", "lon", "v"
 ];
 const CSV_HEADER = FIELDS.concat(["known_crew", "received_at"]);
@@ -164,6 +169,18 @@ const CLOUDS_WX_LOC = process.env.CLOUDS_WX_LOC ||
   "Haywood County,Madison County,Burke County,Caldwell County,Yancey County,McDowell County," +
   "Polk County,Avery County,Watauga County,Mitchell County,Rutherford County";
 const WX_VARS = ["precip", "evaptrans_pm"];
+
+/* CoCoRaHS: volunteer daily rain gauges — a tube in somebody's garden,
+   read each morning. Daily and manual, so it can never feed the hourly
+   water balance; it rides along as a cross-check for trails with no
+   hourly gauge close enough to score from. Ride Kanuga has an observer
+   0.8 mi out where its nearest hourly gauge is 6 mi; Hatley's best is
+   7.2 mi where hourly offers nothing under 10. Scoped to the counties
+   holding (or about to hold) such trails, not the full mountain list —
+   observers are dense and every one of these rows ships to the page. */
+const CLOUDS_COCO_LOC = process.env.CLOUDS_COCO_LOC ||
+  "type=COCORAHS;county=Henderson County,Madison County,Buncombe County," +
+  "McDowell County,Yancey County,Caldwell County";
 
 const SOIL_TTL = 20 * 60 * 1000;   // both networks publish hourly
 
@@ -371,9 +388,73 @@ async function wxSeries(dropped) {
   return out;
 }
 
+/* CoCoRaHS ids look like NC-HN-38 — they fail the isId() regex the
+   harvest() walker keys on, so this network gets its own small parser
+   rather than a loosened regex that would let county names through. */
+let cocoMetaCache = { at: 0, byId: null };
+async function cocoMeta() {
+  if (cocoMetaCache.byId && Date.now() - cocoMetaCache.at < 24 * 3600 * 1000) return cocoMetaCache.byId;
+  const byId = {};
+  try {
+    const j = await cloudsJson(cloudsUrl({ type: "meta", loc: CLOUDS_COCO_LOC, var: "precip" }));
+    const loc = (j.metadata && j.metadata.location) || j.location || {};
+    for (const id of Object.keys(loc)) {
+      const s = loc[id] || {};
+      const g = (k) => (s[k] && s[k].value !== undefined ? s[k].value : (typeof s[k] === "string" ? s[k] : null));
+      const lat = numOf(g("lat")), lon = numOf(g("lon"));
+      if (lat == null || lon == null) continue;
+      byId[id] = { name: g("name"), lat: lat, lon: lon, elev: numOf(g("elev")) };
+    }
+  } catch (e) { /* metadata is optional; observers without coords are counted below */ }
+  cocoMetaCache = { at: Date.now(), byId: byId };
+  return byId;
+}
+
+async function cocoSeries(dropped) {
+  let j;
+  try {
+    j = await cloudsJson(cloudsUrl({
+      loc: CLOUDS_COCO_LOC, var: "precip",
+      start: "-2 days", end: "now", int: "1 day", obtype: "D", metadata: "no"
+    }));
+  } catch (e) {
+    if (dropped) dropped.push("coco:" + String(e.message || e).slice(0, 60));
+    return [];
+  }
+  const data = j.data || {};
+  const meta = await cocoMeta();
+  const out = [];
+  let unplaced = 0;
+  for (const id of Object.keys(data)) {
+    const byDate = data[id];
+    if (!byDate || typeof byDate !== "object") continue;
+    /* Keep the freshest date that carries an actual number. An empty
+       value is an observer who has a row for today but hasn't read the
+       tube yet — fall back to yesterday rather than showing a blank. */
+    let best = null;
+    for (const d of Object.keys(byDate)) {
+      const raw = unwrap((byDate[d] || {}).precip);
+      /* CoCoRaHS reports trace rain as "T" — call it 0.005 rather than
+         dropping it, since "a trace fell" and "nothing fell" are
+         different answers to the question the page is asking. */
+      const p = (typeof raw === "string" && raw.trim().toUpperCase() === "T") ? 0.005 : numOf(raw);
+      if (p === null) continue;
+      if (!best || d > best.date) best = { date: d, precip: p };
+    }
+    if (!best) continue;
+    const m = meta[id];
+    if (!m) { unplaced++; continue; }
+    out.push({ id: id, name: m.name || id, lat: m.lat, lon: m.lon,
+               elev: m.elev == null ? null : m.elev, date: best.date, precip: best.precip });
+  }
+  /* One line, not one per observer — there can be dozens. */
+  if (unplaced && dropped) dropped.push("coco:" + unplaced + " observers without coordinates");
+  return out;
+}
+
 async function soilPayload() {
   if (soilCache.payload && Date.now() - soilCache.at < SOIL_TTL) return soilCache.payload;
-  if (!CLOUDS_HASH) return { stations: [], wx: [], note: "CLOUDS_HASH not set" };
+  if (!CLOUDS_HASH) return { stations: [], wx: [], coco: [], note: "CLOUDS_HASH not set" };
 
   /* One network per query, same as the rain feed: USCRN being slow
      should not take ECONet's readings down with it. */
@@ -406,11 +487,13 @@ async function soilPayload() {
   /* Measured weather is a bonus — never fail the soil payload over it. */
   let wx = [];
   try { wx = await wxSeries(dropped); } catch (e) { dropped.push("wx:" + String(e.message || e).slice(0, 60)); }
+  let coco = [];
+  try { coco = await cocoSeries(dropped); } catch (e) { dropped.push("coco:" + String(e.message || e).slice(0, 60)); }
 
   /* `dropped` is the tell for a truncated upstream response. It is in the
      payload rather than only in the logs so a bad day is one fetch away
      from being visible, not a log search. */
-  const payload = { stations: stations, wx: wx, fetched: new Date().toISOString() };
+  const payload = { stations: stations, wx: wx, coco: coco, fetched: new Date().toISOString() };
   if (dropped.length) payload.dropped = dropped;
   soilCache = { at: Date.now(), payload: payload };
   return payload;
@@ -464,7 +547,7 @@ const server = http.createServer(function (req, res) {
       .catch(function (e) {
         /* Never fail the page over this — it is supplementary data. */
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ stations: [], wx: [], error: String(e.message || e).slice(0, 160) }));
+        res.end(JSON.stringify({ stations: [], wx: [], coco: [], error: String(e.message || e).slice(0, 160) }));
       });
     return;
   }

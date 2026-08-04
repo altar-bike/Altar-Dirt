@@ -402,12 +402,22 @@ window.ALTAR_SETTINGS = {
       zone: "NCZ053", czone: "NCC021", gauge: "0344878100", gaugeMi: 5.1 },
     { name: "North Mills River", place: "Trace Ridge, NC",       lat: 35.4204, lon: -82.6567, soil: "rocky", exposure: "mixed",
       zone: "NCZ065", czone: "NCC089", gauge: "03446000",   gaugeMi: 3.8 },
-    /* station pinned: the closest sensor is Frying Pan Mountain at
-       5,320ft, but Matt's read is that most of the riding here — Black
-       Mountain, Clawhammer, Bennett Gap — sits nearer the valley than
-       the summit, so the lower station speaks for more of it. */
-    { name: "Pisgah Proper",    place: "Davidson River, NC",     lat: 35.2849, lon: -82.7270, soil: "rocky", exposure: "shaded",
+    /* Pisgah split in two (Matt, 4 Aug 2026): one valley sensor was
+       standing in for a 3,000ft spread. Lower anchors on the Ranger
+       Station (OSM: Pisgah District Ranger Station, 35.2848,-82.7270),
+       station pinned to FLET — Matt's read is that Black Mountain,
+       Clawhammer and Bennett Gap sit nearer the valley than the summit. */
+    { name: "Pisgah — Lower",   place: "Ranger Station, NC",     lat: 35.2848, lon: -82.7270, soil: "rocky", exposure: "shaded",
       zone: "NCZ064", czone: "NCC175", gauge: "03441000",   gaugeMi: 1.4, station: "FLET" },
+    /* Upper anchors on the Pisgah Inn (OSM: 35.4029,-82.7538, BRP mp
+       408.6). No station pin: Frying Pan Mountain (FRYI, 5,320ft) is
+       1.3 mi away, wins naturally, and carries an hourly rain gauge —
+       so the high country scores from measured rain at its own
+       elevation instead of a valley forecast. Davidson River gauge kept
+       for the drainage, distance shown honestly. Exposure "mixed" is my
+       call for a ridgeline, not Matt's — flag it to him. */
+    { name: "Pisgah — Upper",   place: "Pisgah Inn, NC",         lat: 35.4029, lon: -82.7538, soil: "rocky", exposure: "mixed",
+      zone: "NCZ064", czone: "NCC175", gauge: "03441000",   gaugeMi: 9.4 },
     { name: "DuPont",           place: "Cedar Mountain, NC",     lat: 35.1990, lon: -82.6180, soil: "rocky", exposure: "mixed",
       zone: "NCZ064", czone: "NCC175", gauge: "03441000",   gaugeMi: 7.1 },
     { name: "Ride Kanuga",      place: "Hendersonville, NC",     lat: 35.2860, lon: -82.5290, soil: "clay",  exposure: "mixed",
@@ -844,9 +854,16 @@ window.ALTAR_SETTINGS = {
     "soil_moisture_0_to_1cm","soil_moisture_3_to_9cm","soil_temperature_6cm"
   ].join(",");
 
-  function url(t) {
+  /* Open-Meteo takes several coordinates in one request and answers
+     with an array in the same order. One trail per call was the bulk
+     of this page's traffic — and the commercial-use question scales
+     with calls, not trails, so batching is also the honest answer to
+     it. Single-trail retries pass a one-element list and get a bare
+     object back; loadBatch handles both shapes. */
+  function url(list) {
     return "https://api.open-meteo.com/v1/forecast" +
-      "?latitude=" + t.lat + "&longitude=" + t.lon +
+      "?latitude=" + list.map(function (t) { return t.lat; }).join(",") +
+      "&longitude=" + list.map(function (t) { return t.lon; }).join(",") +
       "&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_gusts_10m" +
       "&hourly=" + HOURLY +
       "&daily=sunrise,sunset,precipitation_sum,temperature_2m_max" +
@@ -976,6 +993,7 @@ window.ALTAR_SETTINGS = {
         if (!j) return;
         if (j.stations && j.stations.length) EXTRA.stations = j.stations;
         if (j.wx && j.wx.length) EXTRA.wx = j.wx;
+        if (j.coco && j.coco.length) EXTRA.coco = j.coco;
       })
       .catch(function () {});
   }
@@ -1003,6 +1021,26 @@ window.ALTAR_SETTINGS = {
       var mi = milesBetween(t.lat, t.lon, s.lat, s.lon);
       if (mi > maxMi) return;
       if (!best || mi < best.mi) best = { s: s, mi: mi };
+    });
+    return best;
+  }
+
+  /* CoCoRaHS volunteer daily gauges — display-only, never scored.
+     Freshest report wins, THEN nearest. These are volunteers and they
+     lapse: Kanuga's closest observer at 0.4 mi is flagged active but
+     last reported in June. Selecting on distance alone would put
+     five-week-old rain on a card as though it were current. */
+  var COCO_MAX_MI = 8;
+  function nearestCoco(t) {
+    if (!EXTRA.coco) return null;
+    var cutoff = new Date(Date.now() - 2 * 86400e3).toISOString().slice(0, 10);
+    var best = null;
+    EXTRA.coco.forEach(function (s) {
+      if (s.lat == null || s.lon == null || !s.date || s.date < cutoff) return;
+      var mi = milesBetween(t.lat, t.lon, s.lat, s.lon);
+      if (mi > COCO_MAX_MI) return;
+      if (!best || s.date > best.s.date ||
+          (s.date === best.s.date && mi < best.mi)) best = { s: s, mi: mi };
     });
     return best;
   }
@@ -1229,6 +1267,20 @@ window.ALTAR_SETTINGS = {
         '". Too far off to score from.</span></li>';
     }
 
+    /* Volunteer daily gauge, only where nothing hourly scores the trail.
+       A tube read each morning: the number is the 24h to that reading,
+       not this hour — which is why it cross-checks and never scores. */
+    if (!(m && m.rainSource)) {
+      var cc = nearestCoco(t);
+      if (cc) {
+        var ccWhen = cc.s.date === new Date().toISOString().slice(0, 10) ? "this morning" : "yesterday morning";
+        rows += '<li><span class="da-w" style="color:#8C7D70">rain·d</span><span>' +
+          esc(cc.s.name || cc.s.id) + " · " + cc.mi.toFixed(1) + " mi — " +
+          (cc.s.precip < 0.01 ? (cc.s.precip > 0 ? "a trace" : '0.00"') : cc.s.precip.toFixed(2) + '"') +
+          " in the 24h to " + ccWhen + " (volunteer daily gauge)</span></li>";
+      }
+    }
+
     var st = nearestStation(t);
     if (st) {
       var s = st.s, p = [];
@@ -1436,22 +1488,39 @@ window.ALTAR_SETTINGS = {
 
   var rawStore = {};
 
-  function one(t, i, force) {
-    return fetch(url(t), { cache: force ? "reload" : "default" })
+  /* jobs: [{t, i}]. One request for the lot. A trail that fails to
+     build gets its own error card without dragging the others down;
+     a failed request errors them all, each with its own retry. */
+  function loadBatch(jobs, force) {
+    if (!jobs.length) return Promise.resolve();
+    return fetch(url(jobs.map(function (j) { return j.t; })), { cache: force ? "reload" : "default" })
       .then(function (r) {
         if (!r.ok) throw new Error("Weather service returned " + r.status + ".");
         return r.json();
       })
-      .then(function (data) {
-        rawStore[keyOf(t)] = data;
-        models[i] = buildModel(t, data);
-        renderCard(cards[i], t, models[i]);
+      .then(function (arr) {
+        if (!Array.isArray(arr)) arr = [arr];   /* one coordinate = bare object */
+        jobs.forEach(function (job, k) {
+          try {
+            var data = arr[k];
+            if (!data || !data.hourly) throw new Error("Weather service sent nothing for this spot.");
+            rawStore[keyOf(job.t)] = data;
+            models[job.i] = buildModel(job.t, data);
+            renderCard(cards[job.i], job.t, models[job.i]);
+          } catch (e) {
+            renderError(cards[job.i], job.t, job.i, "Couldn't load conditions. " + e.message);
+          }
+        });
         renderVerdict();
       })
       .catch(function (e) {
-        renderError(cards[i], t, i, "Couldn't load conditions. " + e.message);
+        jobs.forEach(function (job) {
+          renderError(cards[job.i], job.t, job.i, "Couldn't load conditions. " + e.message);
+        });
       });
   }
+
+  function one(t, i, force) { return loadBatch([{ t: t, i: i }], force); }
 
   function loadAll(force) {
     refreshBtn.disabled = true;
@@ -1505,19 +1574,12 @@ window.ALTAR_SETTINGS = {
       }
     }
 
-    /* Only the local trails on load. Out-of-state ones join the queue
-       once they've been asked for, so Refresh keeps them current. */
+    /* Only the local trails on load, in ONE request. Out-of-state ones
+       join once they've been asked for, so Refresh keeps them current. */
     var queue = TRAILS.map(function (t, i) { return { t: t, i: i }; })
       .filter(function (j) { return !j.t.away || awayLoaded; });
-    function worker() {
-      if (!queue.length) return Promise.resolve();
-      var job = queue.shift();
-      return one(job.t, job.i, force).then(function () {
-        return new Promise(function (res) { setTimeout(res, 220); });
-      }).then(worker);
-    }
 
-    Promise.all([worker(), worker()]).then(function () {
+    loadBatch(queue, force).then(function () {
       var at = Date.now();
       writeCache(at, rawStore);
       stamp(at);
@@ -1542,14 +1604,7 @@ window.ALTAR_SETTINGS = {
     var jobs = TRAILS.map(function (t, i) { return { t: t, i: i }; })
       .filter(function (j) { return j.t.away && !rawStore[keyOf(j.t)]; });
 
-    function worker() {
-      if (!jobs.length) return Promise.resolve();
-      var job = jobs.shift();
-      return one(job.t, job.i, false).then(function () {
-        return new Promise(function (res) { setTimeout(res, 220); });
-      }).then(worker);
-    }
-    Promise.all([worker(), worker()]).then(function () {
+    loadBatch(jobs, false).then(function () {
       writeCache(Date.now(), rawStore);
       applyExtra();
     });
@@ -1694,7 +1749,17 @@ window.ALTAR_SETTINGS = {
       water_in: m.waterNow == null ? "" : Math.round(m.waterNow * 1000) / 1000,
       dries_out: m.recovery || "",
       wet_mult: m.wetMult, dry_mult: Math.round(m.dryMult * 100) / 100,
-      model_time: m.localTime
+      model_time: m.localTime,
+      /* whether measured rain drove this score, and by how much it
+         disagreed with the forecast — without these a rating can't
+         separate "the model is wrong" from "the input was wrong",
+         which is the whole question calibration has to answer */
+      rain_source: m.rainSource ? m.rainSource.name : "forecast",
+      rain_source_mi: m.rainSource ? Math.round(m.rainSource.mi * 10) / 10 : "",
+      rain_measured: m.rainSource ? Math.round(m.rainSource.measured * 100) / 100 : "",
+      rain_forecast: m.rainSource ? Math.round(m.rainSource.forecast * 100) / 100 : "",
+      et_24h: m.rainSource && m.rainSource.et24 != null ? Math.round(m.rainSource.et24 * 1000) / 1000 : "",
+      rain_watch_gap: m.rainWatch ? Math.round((m.rainWatch.measured - m.rainWatch.forecast) * 100) / 100 : ""
     };
   }
 
@@ -1791,7 +1856,7 @@ window.ALTAR_SETTINGS = {
         }
 
         var payload = snapshot(t, m);
-        payload.v = 2;
+        payload.v = 3;   /* v3 added rain_source/rain_measured/et_24h */
         payload.sent_at = new Date().toISOString();
         payload.reporter_id = who2.id;
         payload.reporter_name = who2.name;
