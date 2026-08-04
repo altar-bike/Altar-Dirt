@@ -894,55 +894,57 @@ window.ALTAR_SETTINGS = {
       .catch(function () {});
   }
 
-  /* --- USGS creek levels. Two calls: current values, then daily means
-         for the trend. Sites are batched into one request each. --- */
+  /* --- USGS creek levels. One call: a day of actual readings, so the
+         trend comes from the last twelve hours rather than daily means.
+         Daily means average a storm spike away — on 3 Aug 2026 Hominy
+         Creek went 39 to 77 cfs in three hours and still read "steady",
+         which is exactly wrong on the back of a peak. --- */
   function loadCreeks() {
     var ids = [];
     TRAILS.forEach(function (t) { if (t.gauge && ids.indexOf(t.gauge) === -1) ids.push(t.gauge); });
     if (!ids.length) return Promise.resolve();
-    var base = "https://waterservices.usgs.gov/nwis/", sites = ids.join(",");
     var got = {};
 
-    function series(j) {
-      return (j && j.value && j.value.timeSeries) || [];
-    }
-
-    return fetch(base + "iv/?format=json&sites=" + sites + "&parameterCd=00060,00065&siteStatus=active")
+    return fetch("https://waterservices.usgs.gov/nwis/iv/?format=json&sites=" + ids.join(",") +
+                 "&parameterCd=00060,00065&period=P1D&siteStatus=active")
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
-        series(j).forEach(function (ts) {
+        ((j && j.value && j.value.timeSeries) || []).forEach(function (ts) {
           var id = ts.sourceInfo.siteCode[0].value;
           var code = ts.variable.variableCode[0].value;
-          var v = ts.values[0] && ts.values[0].value[0];
-          if (!v || v.value === "" || +v.value <= -999) return;
+          var pts = ((ts.values[0] && ts.values[0].value) || [])
+            .map(function (v) { return { t: Date.parse(v.dateTime), n: +v.value }; })
+            .filter(function (p) { return !isNaN(p.t) && !isNaN(p.n) && p.n > -999; });
+          if (!pts.length) return;
+
           var g = got[id] = got[id] || { id: id };
-          if (code === "00060") g.cfs = +v.value;
-          if (code === "00065") g.ft = +v.value;
-          g.at = v.dateTime;
-        });
-        return fetch(base + "dv/?format=json&sites=" + sites + "&parameterCd=00060,00065&period=P7D&statCd=00003");
-      })
-      .then(function (r) { return r && r.ok ? r.json() : null; })
-      .then(function (j) {
-        series(j).forEach(function (ts) {
-          var id = ts.sourceInfo.siteCode[0].value;
-          var code = ts.variable.variableCode[0].value;
-          var g = got[id];
-          if (!g) return;
-          var vals = ((ts.values[0] && ts.values[0].value) || [])
-            .map(function (x) { return +x.value; })
-            .filter(function (n) { return !isNaN(n) && n > -999; });
-          if (vals.length < 2) return;
-          /* prefer discharge for the trend; fall back to stage */
-          if (code === "00060" || (code === "00065" && g.cfs == null)) {
-            var last = vals[vals.length - 1], prev = vals[vals.length - 2];
-            var ch = prev ? (last - prev) / prev : 0;
-            g.trend = ch > 0.12 ? "rising" : ch < -0.12 ? "falling" : "steady";
+          var last = pts[pts.length - 1];
+          if (code === "00060") g.cfs = last.n;
+          if (code === "00065") g.ft = last.n;
+          g.at = new Date(last.t).toISOString();
+
+          /* change against the reading closest to twelve hours back */
+          var target = last.t - 12 * 3600000, ref = null;
+          for (var k = 0; k < pts.length; k++) {
+            if (pts[k].t <= target) ref = pts[k]; else break;
           }
+          if (!ref) ref = pts[0];
+          if (ref.n) g["ch_" + code] = (last.n - ref.n) / ref.n;
         });
       })
       .catch(function () {})
-      .then(function () { EXTRA.creeks = got; });
+      .then(function () {
+        /* discharge is the better signal; stage stands in when it's all
+           a site reports */
+        Object.keys(got).forEach(function (id) {
+          var g = got[id];
+          var ch = g.ch_00060 != null ? g.ch_00060 : g.ch_00065;
+          if (ch == null) return;
+          g.change12 = ch;
+          g.trend = ch > 0.12 ? "rising" : ch < -0.12 ? "falling" : "steady";
+        });
+        EXTRA.creeks = got;
+      });
   }
 
   /* --- Measured soil moisture from NC State ECONet stations, through
@@ -1083,7 +1085,8 @@ window.ALTAR_SETTINGS = {
     var meta = GAUGES[t.gauge] || {};
     var mo = new Date().getMonth() + 1;
     var norm = meta.med ? meta.med[mo] : null;
-    var out = { meta: meta, cfs: g.cfs, ft: g.ft, trend: g.trend, month: MONTHS[mo - 1] };
+    var out = { meta: meta, cfs: g.cfs, ft: g.ft, trend: g.trend,
+                change12: g.change12, month: MONTHS[mo - 1] };
     if (norm && g.cfs != null) {
       out.pct = Math.round(g.cfs / norm * 100);
       out.word = out.pct >= 150 ? "high" : out.pct >= 115 ? "up"
@@ -1113,9 +1116,19 @@ window.ALTAR_SETTINGS = {
       else if (c.pct >= 85)  s = "About what it runs in " + c.month + ". No signal either way.";
       else if (c.pct >= 55)  s = "Down on the " + c.month + " normal. The watershed is dry, so trails shed what falls on them.";
       else                   s = "Well down on normal. Dust before mud.";
-      if (c.trend === "rising") s += " Still climbing, so something upstream is running off.";
+      /* A big jump in half a day beats the seasonal comparison for
+         telling a rider what happened. It is also the only warning
+         they get when the forecast missed the rain outright. */
+      if (c.change12 != null && c.change12 >= 0.4) {
+        s += " But it is up " + r0(c.change12 * 100) + "% in twelve hours, so rain fell in this " +
+             "watershed recently whether the forecast caught it or not.";
+      } else if (c.trend === "rising") s += " Still climbing, so something upstream is running off.";
       else if (c.trend === "falling") s += " Dropping back.";
       return s;
+    }
+    if (c.change12 != null && c.change12 >= 0.4) {
+      return "Creek is up " + r0(c.change12 * 100) + "% in twelve hours. Rain fell in this watershed " +
+             "recently whether the forecast caught it or not.";
     }
     if (c.trend === "rising")  return "Creek is climbing. Something upstream is running off.";
     if (c.trend === "falling") return "Creek is dropping back.";
@@ -1157,7 +1170,14 @@ window.ALTAR_SETTINGS = {
       if (c.cfs != null) bits.push(r0(c.cfs) + " cfs");
       if (c.ft != null) bits.push(c.ft.toFixed(2) + " ft");
       if (c.pct != null) bits.push(c.pct + "% of the " + c.month + " normal");
-      if (c.trend) bits.push(c.trend);
+      /* the 12-hour change matters more than the seasonal comparison
+         right after rain — a creek can sit below its August median and
+         still have doubled since yesterday afternoon */
+      if (c.change12 != null && Math.abs(c.change12) >= 0.12) {
+        bits.push((c.change12 > 0 ? "up " : "down ") + r0(Math.abs(c.change12) * 100) + "% in 12h");
+      } else if (c.trend) {
+        bits.push(c.trend);
+      }
       rows += '<li><span class="da-w" style="color:#8C7D70">creek</span><span>' +
         esc(c.meta.name) + " · " + t.gaugeMi + " mi — " + esc(bits.join(", ")) + "</span></li>";
     }

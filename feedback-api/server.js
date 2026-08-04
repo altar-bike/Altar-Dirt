@@ -146,9 +146,16 @@ const SOIL_VARS = ["soilmoist", "soilmoist20cm", "soiltemp"];
 /* Measured weather. RAWS fire-weather stations carry no soil moisture
    but do carry a real rain gauge and Penman-Monteith evapotranspiration,
    and they sit inside the forests — 1.6 mi from Pisgah, 1.9 mi from
-   DuPont. Scoped to the mountain counties so the payload stays small. */
+   DuPont. Scoped to the mountain counties so the payload stays small.
+
+   USCRN is in here too, for its RAIN GAUGE rather than its soil probe.
+   Asheville 8 SSW sits 0.8 mi from Bent Creek — closer than any RAWS —
+   and on 3 Aug 2026 it caught 0.92 in over four hours that the forecast
+   had as 0.00. Bent Creek had no gauge inside the threshold and showed
+   hero dirt on a trail that had just taken an inch of rain. That is the
+   reason this line includes USCRN. */
 const CLOUDS_WX_LOC = process.env.CLOUDS_WX_LOC ||
-  "type=RAWS;county=Transylvania County,Henderson County,Buncombe County," +
+  "type=RAWS,USCRN;county=Transylvania County,Henderson County,Buncombe County," +
   "Haywood County,Madison County,Burke County,Caldwell County,Yancey County,McDowell County";
 const WX_VARS = ["precip", "evaptrans_pm"];
 
