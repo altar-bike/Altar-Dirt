@@ -436,17 +436,31 @@ Three things this changes, in order of value:
   entities, so Altar does not qualify. Remaining options are a 14-day
   trial and then commercial pricing, which is quote-only. Tokens are
   managed at customer.synopticdata.com/credentials. Deprioritise.
-- **CoCoRaHS is already on the CLOUDS key** — `type=COCORAHS`. It is the
-  volunteer rain-gauge network and there are enough *active* observers in
-  Madison County (Hatley Pointe) and Henderson County (Ride Kanuga) to
-  overflow a 20KB debug response, which is exactly where the two rain
-  gaps are. Not yet integrated. Two things to know before wiring it up:
-  readings are **daily and manual**, not hourly, so they cannot feed the
-  hourly water balance directly — treat them as a daily total to
-  cross-check the forecast, or distribute across the day. And
-  `/soil/raw` caps output at 20,000 characters, which a single county's
-  CoCoRaHS metadata exceeds; raise the cap or filter server-side before
-  trying to enumerate the nearest observer.
+- **CoCoRaHS is already on the CLOUDS key** — `type=COCORAHS`. Volunteer
+  rain-gauge network; surveyed 4 Aug 2026. Nearest *active* observer to
+  each trail, with the date they last reported:
+
+  | Trail | Nearest CoCoRaHS | Verdict |
+  |---|---|---|
+  | Ride Kanuga | NC-HN-38 Etowah 1.1 WNW — 5.3 mi, 2,217ft, to 08-03 | **worth adding** — Kanuga has no gauge at all today |
+  | Hatley Pointe | NC-MS-28 Mars Hill 6.8 E — 10 mi, 2,753ft, to 08-03 | marginal; best that exists anywhere near it |
+  | Pisgah Proper | NC-TR-23 Pisgah Forest 2.5 N — 1.8 mi, to 08-03 | no gain; RAWS SMPN7 is 1.6 mi and hourly |
+  | DuPont | NC-TR-16 Brevard 0.6 SSE — 6.4 mi, to 08-02 | no gain; Guion Farm is 1.9 mi and hourly |
+  | Bent Creek | NC-BC-163 Candler 1.9 ESE — 2.9 mi, to 07-30 | close but **lapsed** — see below |
+  | N Mills River | NC-BC-145 Avery Creek 0.9 ESE — 6 mi, to 08-02 | marginal |
+
+  **The catch is reliability, not distance.** These are volunteers, and
+  the `data_end` dates prove it: Bent Creek's closest observer at 2.9 mi
+  last reported 30 July, and the next at 4.1 mi stopped 27 July. Any
+  integration must pick *the most recent reporter within N miles*, never
+  simply the nearest, or a card will quietly show week-old rain.
+
+  Also **daily and manual**, not hourly — someone empties a tube each
+  morning. It cannot feed the hourly water balance directly; use it as a
+  daily total to cross-check the forecast, or spread it across the day.
+
+  Net: only **Ride Kanuga** clearly gains, and Hatley Pointe marginally.
+  Pisgah and DuPont are already better served by hourly RAWS gauges.
 - **Crew-owned stations** — Tempest and Ambient Weather both have APIs.
   No soil moisture, but on-trail rain gauges from riders would beat
   forecast rain. Worth asking the crew.
