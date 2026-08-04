@@ -289,10 +289,29 @@ The soil and exposure multipliers now drive both sides: `wet` scales
 how hard the water hurts, `dry` scales how fast the store empties. So
 recalibrating those still works exactly as described below.
 
-**`DECAY` is a guess, like the rest of the multipliers.** It is the
-easiest one to check, because ECONet gives measured soil moisture:
-after a storm, plot the station's decay against the store's and see
-whether they fall at the same rate. That check needs no rider ratings.
+**`DECAY` is a guess, like the rest of the multipliers** — and as of
+4 Aug 2026 there is **no measured quantity available to validate it**.
+The plan was to plot the ECONet/USCRN station decay against the store's,
+but those sensors do not respond to rain at all (see "The soil sensors
+do not measure what the cards imply"). Rider ratings are the only route
+left, with creek response as a coarse watershed-scale sanity check.
+
+**Worked example of how the wetness terms actually add up** — Bent Creek
+at 19:00 on 4 Aug, 22 hours after 0.92 in fell in four hours:
+
+| term | maths | points |
+|---|---|---|
+| subsoil 30% (above the 0.27 ceiling) | `(0.30−0.27) × 430 × 0.55` | −8 |
+| 0.40 in still in the store | `0.40 × 46 × 0.55` | −10 |
+| | | **82 = "good"** |
+
+Both terms are halved by rocky's `wet: 0.55`. With `wet: 1.0` the same
+hour reads **69, "soft"** — the constant, not the physics, is deciding
+whether the page says go ride. That is the single highest-leverage
+number in the model and it has never been checked against anything.
+Matt's read (4 Aug) is that half an inch inside a day should not leave a
+trail in "good", and his one rating so far agrees in direction: shown
+94, verdict −1, "maybe a 90ish."
 
 ### Drying time
 
@@ -559,7 +578,49 @@ Black Mountain, Clawhammer, Bennett Gap — sits nearer the valley than
 the summit, so the lower sensor speaks for more of it. This is the
 kind of call to take from him rather than the map.
 
-**Caveat on FLET.** Mountain Horticultural Crops Research Station is a
+### The soil sensors do not measure what the cards imply (4 Aug 2026)
+
+Investigated after Matt questioned Bent Creek's 82. Three findings, all
+verified against `/soil/raw`, all of which weaken the measured-soil
+story considerably. **Do not treat station soil moisture as ground truth
+until these are resolved.**
+
+**1. `soilmoist` and `soilmoist20cm` are the same sensor.** Queried
+separately for `0246CA`, CLOUDS returns byte-identical values under both
+names (24.9, 25.6 at the same timestamps). It aliases one probe to both
+variable names. So we have ONE depth, we do not know which, and the
+card's "at 20cm" label is inferred from which key came back non-null —
+it is not a claim CLOUDS supports. `normaliseMoisture` and the
+surface/20cm branch in `measuredHtml` are both built on this assumption.
+
+**2. FLET is flatlined.** It returned exactly `0.44` for both variables
+every hour for 30 straight hours. A live probe does not hold two
+decimal places for thirty hours. The earlier note below — that FLET
+reads wet because it is an irrigated research farm — is probably wrong;
+it reads wet because it is **stuck**. FLET is displayed on Pisgah —
+Lower and North Mills River as "44% water at 20cm", i.e. we are showing
+a dead sensor as a live reading. Showing nothing would be better, per
+the project's own rule about degrading to nothing rather than to
+something misleading.
+
+**3. The sensor cannot see the rain that decides a trail.** 0.92 in
+fell at `0246CA` between 18:00 and 21:00 on 3 Aug. The station's soil
+moisture went 26.1 → 25.3 → 24.8 straight through it and kept falling.
+It never rose at all. It also oscillates daily — ~23.9 before dawn to
+~26.5 mid-afternoon, every day, rain or not — which is the signature of
+a temperature-sensitive dielectric reading, not moisture. Whatever
+depth it sits at, it is deep enough that an inch of rain in the top
+couple of inches is invisible to it.
+
+Consequence: **the calibration check promised above — "plot the
+station's decay against the store's and see whether they fall at the
+same rate" — cannot be done with these sensors.** They do not respond
+to storms. `DECAY` remains unvalidated and there is currently no
+measured quantity available that can validate it. The honest paths are
+rider ratings, or creek response as a coarse watershed-scale proxy.
+
+**Caveat on FLET (superseded in part by the flatline finding above).**
+Mountain Horticultural Crops Research Station is a
 working agricultural research station and reads much wetter than nearby
 sites (0.44 m³/m³ against 0.25–0.30 at Frying Pan and Green River).
 Some of that is likely irrigation, not weather. Trust its trend more
