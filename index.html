@@ -554,6 +554,42 @@ window.ALTAR_SETTINGS = {
     for (var i = 0; i < times.length; i++) if (times[i].slice(0, 13) === nowKey) { nowIdx = i; break; }
     if (nowIdx < 0) nowIdx = Math.max(0, times.length - 49);
 
+    /* ---------------- rain: measured where we can get it ----------------
+       A gauge inside the forest beats a forecast for the same hour, and
+       rain is where forecast error hurts most — whether it fell here at
+       all is the whole question. So for past hours a nearby RAWS gauge
+       wins; forecast fills every hour it didn't measure, and all future
+       hours, because you cannot measure the future. If the station drops
+       out the page silently reverts to forecast. */
+    var gauge = nearestWx(t);
+    var precip = [], gHours = 0, gSum = 0, fSum = 0;
+    for (i = 0; i < times.length; i++) {
+      var fcast = h.precipitation[i] || 0, use = fcast;
+      if (gauge) {
+        var rec = gauge.s.hours[times[i].slice(0, 13)];
+        if (rec && rec.p != null) {
+          use = rec.p;
+          if (i <= nowIdx) { gHours++; gSum += rec.p; fSum += fcast; }
+        }
+      }
+      precip.push(use);
+    }
+    /* measured evapotranspiration over the last day — shown, not yet
+       used to drive the decay. See the note in CLAUDE.md. */
+    var et24 = null;
+    if (gauge) {
+      var e = 0, seen = 0;
+      for (i = Math.max(0, nowIdx - 23); i <= nowIdx; i++) {
+        var er = gauge.s.hours[times[i].slice(0, 13)];
+        if (er && er.et != null) { e += er.et; seen++; }
+      }
+      if (seen >= 6) et24 = e;
+    }
+    var rainSource = gauge ? {
+      name: gauge.s.name, mi: gauge.mi, hours: gHours,
+      measured: gSum, forecast: fSum, et24: et24
+    } : null;
+
     var rates = [];
     for (i = 0; i < times.length; i++) rates.push(dryingRate(h, i, dryMult));
     var speedWord = dryMult >= 1.25 ? "fast" : dryMult <= 0.75 ? "slow" : "steady";
@@ -578,7 +614,7 @@ window.ALTAR_SETTINGS = {
     var DECAY = 0.06;
     var water = [], wStore = 0;
     for (i = 0; i < times.length; i++) {
-      wStore = (wStore + (h.precipitation[i] || 0)) * Math.exp(-DECAY * rates[i]);
+      wStore = (wStore + (precip[i] || 0)) * Math.exp(-DECAY * rates[i]);
       if (wStore < 0.0005) wStore = 0;
       water.push(wStore);
     }
@@ -608,7 +644,7 @@ window.ALTAR_SETTINGS = {
       }
 
       var wt = water[i];
-      var hsr = hoursSinceRain(h.precipitation, i);
+      var hsr = hoursSinceRain(precip, i);
       if (wt > 0.004) {
         p = Math.min(58, wt * 46 * soilMult);
         if (p > 1) {
@@ -620,7 +656,7 @@ window.ALTAR_SETTINGS = {
         drivers.push({ w: "ok", t: "nothing left from the last rain \u2014 " + speedWord + " drying on this aspect" });
       }
 
-      var pNow = h.precipitation[i] || 0;
+      var pNow = precip[i] || 0;
       if (pNow >= 0.02) { score -= 24; drivers.push({ w: "\u221224", t: "rain falling right now" }); }
       else if (pNow > 0) { score -= 9; drivers.push({ w: "\u22129", t: "trace precipitation" }); }
 
@@ -741,11 +777,11 @@ window.ALTAR_SETTINGS = {
 
     return {
       now: nowEval, today: today, best: best, outlook: outlook,
-      recovery: recovery, waterNow: water[nowIdx],
+      recovery: recovery, waterNow: water[nowIdx], rainSource: rainSource,
       hasSoil: hasSoil, nowIdx: nowIdx,
-      p24: sumPrecip(h.precipitation, nowIdx, 24),
-      p72: sumPrecip(h.precipitation, nowIdx, 72),
-      hsr: hoursSinceRain(h.precipitation, nowIdx),
+      p24: sumPrecip(precip, nowIdx, 24),
+      p72: sumPrecip(precip, nowIdx, 72),
+      hsr: hoursSinceRain(precip, nowIdx),
       elevation: data.elevation, current: data.current,
       /* raw inputs, kept so a rider's rating can be matched to the exact
          model state that produced the score they were looking at */
@@ -891,9 +927,28 @@ window.ALTAR_SETTINGS = {
     return fetch(ep)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) {
-        if (j && j.stations && j.stations.length) EXTRA.stations = j.stations;
+        if (!j) return;
+        if (j.stations && j.stations.length) EXTRA.stations = j.stations;
+        if (j.wx && j.wx.length) EXTRA.wx = j.wx;
       })
       .catch(function () {});
+  }
+
+  /* How close a rain gauge has to be before the model prefers it to the
+     forecast. A gauge is a point and a forecast is an area average, so
+     past about three miles the gauge stops speaking for the trail. */
+  var WX_MAX_MI = 3.5;
+
+  function nearestWx(t) {
+    if (!EXTRA.wx) return null;
+    var best = null;
+    EXTRA.wx.forEach(function (s) {
+      if (s.lat == null || s.lon == null || !s.hours) return;
+      var mi = milesBetween(t.lat, t.lon, s.lat, s.lon);
+      if (mi > WX_MAX_MI) return;
+      if (!best || mi < best.mi) best = { s: s, mi: mi };
+    });
+    return best;
   }
 
   function milesBetween(a, b, c, d) {
@@ -1080,6 +1135,18 @@ window.ALTAR_SETTINGS = {
       rows += '<li><span class="da-w" style="color:#8C7D70">creek</span><span>' +
         esc(c.meta.name) + " · " + t.gaugeMi + " mi — " + esc(bits.join(", ")) + "</span></li>";
     }
+    var rs = m && m.rainSource;
+    if (rs && rs.hours >= 6) {
+      var bits2 = [rs.measured.toFixed(2) + '" measured over ' + rs.hours + "h"];
+      var gap = rs.measured - rs.forecast;
+      if (Math.abs(gap) >= 0.05) {
+        bits2.push("forecast said " + rs.forecast.toFixed(2) + '"');
+      }
+      if (rs.et24 != null) bits2.push(rs.et24.toFixed(2) + '" evaporated in 24h');
+      rows += '<li><span class="da-w" style="color:#8C7D70">rain</span><span>' +
+        esc(rs.name) + " · " + rs.mi.toFixed(1) + " mi — " + esc(bits2.join(", ")) + "</span></li>";
+    }
+
     var st = nearestStation(t);
     if (st) {
       var s = st.s, p = [];
@@ -1097,6 +1164,13 @@ window.ALTAR_SETTINGS = {
     if (!rows) return "";
 
     var says = [];
+    if (rs && rs.hours >= 6) {
+      var g = rs.measured - rs.forecast;
+      if (g >= 0.1) says.push("The gauge caught " + g.toFixed(2) +
+        '" more rain than the forecast had, so this score is wetter than the forecast alone would read.');
+      else if (g <= -0.1) says.push("The forecast expected " + Math.abs(g).toFixed(2) +
+        '" more rain than actually fell, so this score is drier than the forecast alone would read.');
+    }
     if (c) { var cm = creekMeaning(c); if (cm) says.push(cm); }
     if (st) { var sMsg = stationMeaning(st.s, m); if (sMsg) says.push(sMsg); }
 
@@ -1292,7 +1366,23 @@ window.ALTAR_SETTINGS = {
        soon as the score is ready; these patch in when they arrive, and
        are skipped silently if a source is down. */
     Promise.all([loadAlerts(), loadCreeks(), loadStations()])
-      .then(applyExtra)
+      .then(function () {
+        /* Measured rain feeds the water balance, so it changes the score
+           and not just the card. Any trail already built from forecast
+           rain has to be rebuilt once the gauges land. */
+        if (EXTRA.wx) {
+          TRAILS.forEach(function (t, i) {
+            var raw = rawStore[keyOf(t)];
+            if (!raw) return;
+            try {
+              models[i] = buildModel(t, raw);
+              renderCard(cards[i], t, models[i]);
+            } catch (e) {}
+          });
+          renderVerdict();
+        }
+        applyExtra();
+      })
       .catch(function () {});
 
     var cached = force ? null : readCache();

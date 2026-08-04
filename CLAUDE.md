@@ -223,10 +223,56 @@ next to the score, and deliberately does **not** feed into it.
 
 | Source | Key? | Called from | What it gives |
 |---|---|---|---|
-| Open-Meteo | no | the page | forecast + modelled soil moisture — the score |
+| Open-Meteo | no | the page | forecast weather + modelled soil moisture — the score's backbone |
 | NWS `api.weather.gov` | no | the page | watches/warnings/advisories per trail |
 | USGS Water Services | no | the page | creek discharge/stage + 7-day trend |
-| NC State CLOUDS | **yes** | Railway `/soil` | measured ECONet soil moisture and temperature |
+| CLOUDS — ECONet + USCRN | **yes** | Railway `/soil` → `stations` | measured soil moisture and temperature |
+| CLOUDS — RAWS | **yes** | Railway `/soil` → `wx` | **measured hourly rain** + evapotranspiration |
+
+### Measured rain feeds the score
+
+Rain is the one input where forecast error really hurts — whether it
+fell *here* is the whole question — so where a RAWS gauge is within
+`WX_MAX_MI` (3.5 miles) the model uses its measured hourly rain instead
+of the forecast. Forecast fills any hour the gauge missed, and every
+future hour, because you cannot measure the future. If a station drops
+out the page reverts to forecast with no visible failure.
+
+This is the one measured source that **does** change the score, and it
+changes it by improving an input rather than by retuning a constant —
+no recalibration needed. Consequences to know about:
+
+- `p24`, `p72`, `hsr` and the water-balance store are all computed from
+  the blended series, so the facts row and the ratings payload reflect
+  measured rain too.
+- The gauges arrive after the first render, so trails already built from
+  forecast rain get **rebuilt** when `/soil` lands (see the
+  `Promise.all` in `loadAll`). Expect one re-render on load.
+- The card names the gauge, the hours used, and the forecast figure
+  beside the measured one, so a disagreement is visible rather than
+  silently baked in.
+
+**Evapotranspiration is shown but does not drive the decay yet.** RAWS
+carries Penman-Monteith ET, which is the physically correct sink term
+for a water balance in inches and would be better than the hand-rolled
+`dryingRate()`. It is not wired in because swapping it would introduce
+a new unknown scaling constant with nothing to fit it against, right
+after replacing the drying heuristic. Fit it first: ET is on the card
+and in the payload, so compare it against the store's decay over a few
+storms before letting it drive anything.
+
+**Units differ between networks.** ECONet reports volumetric water as a
+fraction (0.44), USCRN as a percentage (24.3). `normaliseMoisture()` in
+`server.js` divides anything above 1.5 by 100 — soil never holds more
+than about 0.6 by volume, so the test is safe. Any new soil network
+needs checking against this.
+
+Station selection is unchanged: closest wins, ties inside 2 miles break
+downhill. With USCRN in the pool, **Bent Creek now reads from Asheville
+8 SSW at 0.8 miles** instead of FLET at 6.
+
+`CLOUDS_LOC` and `CLOUDS_WX_LOC` env vars control which networks and
+counties are queried, if the sensor set needs widening.
 
 **Why measured data doesn't change the score.** Creek level and station
 soil moisture are better signals than the model in principle, but

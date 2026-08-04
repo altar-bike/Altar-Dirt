@@ -135,12 +135,27 @@ function rateLimited(ip) {
 
 const CLOUDS_URL = "https://api.climate.ncsu.edu/data.php";
 const CLOUDS_HASH = process.env.CLOUDS_HASH || "";
-const CLOUDS_LOC = process.env.CLOUDS_LOC || "type=ECONET;state=NC";
+
+/* Soil sensors. USCRN is the US Climate Reference Network — research
+   grade, and one of its sites sits 0.8 miles from Bent Creek, far
+   closer than any ECONet station. Note the units differ between the
+   two networks; normaliseMoisture() below handles that. */
+const CLOUDS_LOC = process.env.CLOUDS_LOC || "type=ECONET,USCRN;state=NC";
 const SOIL_VARS = ["soilmoist", "soilmoist20cm", "soiltemp"];
-const SOIL_TTL = 20 * 60 * 1000;   // ECONet publishes hourly
+
+/* Measured weather. RAWS fire-weather stations carry no soil moisture
+   but do carry a real rain gauge and Penman-Monteith evapotranspiration,
+   and they sit inside the forests — 1.6 mi from Pisgah, 1.9 mi from
+   DuPont. Scoped to the mountain counties so the payload stays small. */
+const CLOUDS_WX_LOC = process.env.CLOUDS_WX_LOC ||
+  "type=RAWS;county=Transylvania County,Henderson County,Buncombe County," +
+  "Haywood County,Madison County,Burke County,Caldwell County,Yancey County,McDowell County";
+const WX_VARS = ["precip", "evaptrans_pm"];
+
+const SOIL_TTL = 20 * 60 * 1000;   // both networks publish hourly
 
 let soilCache = { at: 0, payload: null };
-let metaCache = { at: 0, byId: null };
+let metaCache = {};   // keyed by loc
 
 function cloudsUrl(extra) {
   const u = new URL(CLOUDS_URL);
@@ -241,23 +256,66 @@ async function cloudsJson(url) {
 }
 
 /* Station coordinates change rarely; hold them for a day. */
-async function stationMeta() {
-  if (metaCache.byId && Date.now() - metaCache.at < 24 * 3600 * 1000) return metaCache.byId;
+async function stationMeta(loc, vars) {
+  const hit = metaCache[loc];
+  if (hit && Date.now() - hit.at < 24 * 3600 * 1000) return hit.byId;
   const out = {};
   try {
-    harvest(await cloudsJson(cloudsUrl({ type: "meta", var: SOIL_VARS.join(",") })), null, out);
+    harvest(await cloudsJson(cloudsUrl({ type: "meta", loc: loc, var: vars })), null, out);
   } catch (e) { /* coordinates are optional */ }
-  metaCache = { at: Date.now(), byId: out };
+  metaCache[loc] = { at: Date.now(), byId: out };
+  return out;
+}
+
+/* ECONet reports volumetric water content as a fraction (0.44); USCRN
+   reports the same quantity as a percentage (24.3). Soil never holds
+   more than about 0.6 by volume, so anything above 1.5 is a percentage. */
+function normaliseMoisture(v) {
+  if (v == null) return null;
+  return v > 1.5 ? v / 100 : v;
+}
+
+/* Hourly rain and evapotranspiration from the fire-weather stations.
+   Three days back is exactly what the page's water balance needs to
+   rebuild its store from measured rather than forecast rain. */
+async function wxSeries() {
+  const j = await cloudsJson(cloudsUrl({
+    loc: CLOUDS_WX_LOC, var: WX_VARS.join(","),
+    start: "-3 days", end: "now", int: "1 hour", obtype: "H"
+  }));
+  const data = j.data || {};
+  const meta = await stationMeta(CLOUDS_WX_LOC, WX_VARS.join(","));
+  const out = [];
+  for (const id of Object.keys(data)) {
+    const byTime = data[id];
+    if (!byTime || typeof byTime !== "object") continue;
+    const hours = {};
+    let n = 0;
+    for (const t of Object.keys(byTime)) {
+      const rec = byTime[t];
+      if (!rec || typeof rec !== "object") continue;
+      const p = numOf(unwrap(rec.precip));
+      const et = numOf(unwrap(rec.evaptrans_pm));
+      if (p === null && et === null) continue;
+      /* key by local hour so it lines up with Open-Meteo's timestamps */
+      const s = String(t);
+      hours[s.slice(0, 10) + "T" + s.slice(11, 13)] = { p: p, et: et };
+      n++;
+    }
+    const m = meta[id] || {};
+    if (!n || m.lat == null || m.lon == null) continue;
+    out.push({ id: id, name: m.name || id, lat: m.lat, lon: m.lon, elev: m.elev == null ? null : m.elev, hours: hours });
+  }
   return out;
 }
 
 async function soilPayload() {
   if (soilCache.payload && Date.now() - soilCache.at < SOIL_TTL) return soilCache.payload;
-  if (!CLOUDS_HASH) return { stations: [], note: "CLOUDS_HASH not set" };
+  if (!CLOUDS_HASH) return { stations: [], wx: [], note: "CLOUDS_HASH not set" };
 
   const data = {};
   harvest(await cloudsJson(cloudsUrl({ var: SOIL_VARS.join(","), data_limit: "last" })), null, data);
-  const meta = await stationMeta();
+  const meta = await stationMeta(CLOUDS_LOC, SOIL_VARS.join(","));
 
   const stations = Object.keys(data).map(function (id) {
     const d = data[id], m = meta[id] || {};
@@ -267,8 +325,8 @@ async function soilPayload() {
       lat: d.lat != null ? d.lat : (m.lat != null ? m.lat : null),
       lon: d.lon != null ? d.lon : (m.lon != null ? m.lon : null),
       elev: d.elev != null ? d.elev : (m.elev != null ? m.elev : null),
-      soilmoist: d.soilmoist != null ? d.soilmoist : null,
-      soilmoist20cm: d.soilmoist20cm != null ? d.soilmoist20cm : null,
+      soilmoist: normaliseMoisture(d.soilmoist),
+      soilmoist20cm: normaliseMoisture(d.soilmoist20cm),
       soiltemp: d.soiltemp != null ? d.soiltemp : null,
       at: d.at || null
     };
@@ -277,7 +335,11 @@ async function soilPayload() {
       (s.soilmoist != null || s.soilmoist20cm != null || s.soiltemp != null);
   });
 
-  const payload = { stations: stations, fetched: new Date().toISOString() };
+  /* Measured weather is a bonus — never fail the soil payload over it. */
+  let wx = [];
+  try { wx = await wxSeries(); } catch (e) { wx = []; }
+
+  const payload = { stations: stations, wx: wx, fetched: new Date().toISOString() };
   soilCache = { at: Date.now(), payload: payload };
   return payload;
 }
@@ -330,7 +392,7 @@ const server = http.createServer(function (req, res) {
       .catch(function (e) {
         /* Never fail the page over this — it is supplementary data. */
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ stations: [], error: String(e.message || e).slice(0, 160) }));
+        res.end(JSON.stringify({ stations: [], wx: [], error: String(e.message || e).slice(0, 160) }));
       });
     return;
   }

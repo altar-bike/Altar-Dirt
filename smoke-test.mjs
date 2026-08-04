@@ -70,8 +70,22 @@ await page.route("**://api.weather.gov/**", (r) =>
   r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ features: [] }) }));
 await page.route("**://waterservices.usgs.gov/**", (r) =>
   r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ value: { timeSeries: [] } }) }));
+/* A soil station and a rain gauge, both parked next to Bent Creek. The
+   gauge deliberately reports MORE rain than the synthetic forecast, so
+   the measured-rain path and the disagreement copy both get exercised. */
+const gaugeHours = {};
+for (let i = 0; i <= NOW; i++) {
+  const k = iso(i).slice(0, 13);
+  gaugeHours[k] = { p: precipitation[i] > 0 ? precipitation[i] + 0.05 : 0, et: 0.012 };
+}
+const soilPayload = {
+  stations: [{ id: "TEST", name: "Test Soil Station", lat: 35.4950, lon: -82.6300,
+               elev: 2100, soilmoist: 0.31, soilmoist20cm: 0.31, soiltemp: 68, at: iso(NOW) }],
+  wx: [{ id: "TESTG", name: "Test Rain Gauge", lat: 35.4950, lon: -82.6300,
+         elev: 2100, hours: gaugeHours }]
+};
 await page.route("**://altar-dirt-production.up.railway.app/**", (r) =>
-  r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ stations: [] }) }));
+  r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(soilPayload) }));
 await page.route("**fonts.googleapis.com**", (r) => r.fulfill({ status: 200, body: "" }));
 
 await page.goto("file://" + process.cwd() + "/index.html", { waitUntil: "load" });
@@ -85,18 +99,27 @@ const r = await page.evaluate(() => {
     errors: [...document.querySelectorAll(".da-err")].map((e) => e.textContent),
     scores: cards.map((c) => c.querySelector(".da-score")?.textContent ?? null),
     windows: cards.map((c) => c.querySelector(".da-window")?.textContent.trim()),
-    drivers: [...(cards[0]?.querySelectorAll(".da-why li") || [])].map((l) => l.textContent.replace(/\s+/g, " ").trim())
+    drivers: [...(cards[0]?.querySelectorAll(".da-why li") || [])].map((l) => l.textContent.replace(/\s+/g, " ").trim()),
+    measured: [...(cards[0]?.querySelectorAll(".da-measured-in li") || [])].map((l) => l.textContent.replace(/\s+/g, " ").trim()),
+    meaning: cards[0]?.querySelector(".da-meaning")?.textContent.replace(/\s+/g, " ").trim() || null
   };
 });
 await browser.close();
+
+/* Bent Creek has a gauge 0.25 mi away in the stub, so the rain row and
+   the disagreement sentence must both be present. */
+if (!r.measured.some((l) => l.startsWith("rain"))) problems.push("measured rain row missing on Bent Creek");
+if (!/gauge caught/.test(r.meaning || "")) problems.push("gauge-vs-forecast sentence missing");
 
 if (r.errors.length) problems.push("cards showing an error: " + r.errors[0]);
 if (r.cards !== 9) problems.push("expected 9 cards, got " + r.cards);
 if (r.scores.some((s) => s === null)) problems.push("a card rendered no score");
 
-console.log("scores :", r.scores.join(" "));
-console.log("window :", r.windows[0]);
-console.log("drivers:", r.drivers.join("  |  "));
+console.log("scores  :", r.scores.join(" "));
+console.log("window  :", r.windows[0]);
+console.log("drivers :", r.drivers.join("  |  "));
+console.log("measured:", r.measured.join("  |  "));
+console.log("meaning :", r.meaning);
 
 if (problems.length) { console.error("\nFAIL\n" + problems.join("\n")); process.exit(1); }
 console.log("\nPASS — 9 cards, no JS errors");
