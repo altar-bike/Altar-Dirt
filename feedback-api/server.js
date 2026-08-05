@@ -476,26 +476,33 @@ async function soilPayload() {
      slow-moving quantity, not a dead sensor. Compare the reading's own
      timestamp instead: that catches a station that has actually stopped
      and cannot be fooled by precision. */
-  const STALE_HOURS = 6;
+  /* Measure each station against the FRESHEST station in the same
+     payload, never against our own wall clock. CLOUDS sends timestamps
+     with no zone marker, this container runs in UTC, and the first
+     version of this compared the two directly — which made every
+     station look four hours old and dropped all three USCRN sites,
+     including the one 0.8 mi from Bent Creek. Relative freshness needs
+     no timezone assumption at all: whatever zone CLOUDS is using, it
+     is using the same one for every station, so the offset cancels. */
+  const STALE_HOURS = 8;
   const stale = [];
-  const nowMs = Date.now();
-  function ageHours(at) {
-    if (!at) return null;
-    /* CLOUDS timestamps are local Eastern with no zone marker. Treating
-       them as UTC would make everything look 4-5 hours old, so parse the
-       wall clock and compare against the same wall clock here. */
-    const m2 = String(at).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
-    if (!m2) return null;
-    const asUtc = Date.UTC(+m2[1], +m2[2] - 1, +m2[3], +m2[4], +m2[5]);
-    const nowLocalAsUtc = nowMs + new Date().getTimezoneOffset() * -60000;
-    return (nowLocalAsUtc - asUtc) / 3600000;
+  function stamp(at) {
+    const m2 = String(at || "").match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+    return m2 ? Date.UTC(+m2[1], +m2[2] - 1, +m2[3], +m2[4], +m2[5]) : null;
+  }
+  let newest = null;
+  for (const id of Object.keys(data)) {
+    const s = stamp(data[id].at);
+    if (s !== null && (newest === null || s > newest)) newest = s;
   }
 
   const stations = Object.keys(data).map(function (id) {
     const d = data[id], m = meta[id] || {};
-    const age = ageHours(d.at);
+    const s = stamp(d.at);
+    const age = (s === null || newest === null) ? null
+      : Math.round((newest - s) / 360000) / 10;   /* hours behind the freshest */
     const dead = age != null && age > STALE_HOURS;
-    if (dead) stale.push(id + ":" + Math.round(age) + "h old");
+    if (dead) stale.push(id + ":" + Math.round(age) + "h behind");
     return {
       id: id,
       name: d.name || m.name || id,
@@ -506,7 +513,8 @@ async function soilPayload() {
       soilmoist20cm: dead ? null : normaliseMoisture(d.soilmoist20cm),
       soiltemp: dead || d.soiltemp == null ? null : d.soiltemp,
       at: d.at || null,
-      ageHours: age == null ? null : Math.round(age * 10) / 10
+      /* hours behind the freshest station in this payload, not wall-clock age */
+      behindHours: age
     };
   }).filter(function (s) {
     return s.lat != null && s.lon != null &&
