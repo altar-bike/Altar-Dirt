@@ -251,15 +251,6 @@ function harvest(node, ctxId, out) {
       const when = (raw && typeof raw === "object" && raw.datetime)
         ? String(raw.datetime) : (unwrap(node.datetime) || null);
       const r = rec();
-      /* Track the spread across every reading in the window, not just
-         the freshest, so a dead probe can be told from a live one. FLET
-         returned exactly 0.44 for thirty straight hours on 4 Aug 2026
-         and the page displayed it as a live reading. */
-      r.seen = r.seen || {};
-      const sp = (r.seen[v] = r.seen[v] || { n: 0, min: n, max: n });
-      sp.n++;
-      if (n < sp.min) sp.min = n;
-      if (n > sp.max) sp.max = n;
       if (when && r.at && when < r.at) continue;
       if (when) r.at = when;
       r[v] = n;
@@ -470,48 +461,52 @@ async function soilPayload() {
   const data = {}, meta = {}, dropped = [];
   for (const loc of locVariants(CLOUDS_LOC)) {
     try {
-      /* A 12-hour window rather than data_limit=last: same one request,
-         and it is the only way to see whether a probe is actually
-         moving. harvest() still keeps the freshest value; the extra
-         rows only feed the flatline check. */
-      harvest(await cloudsJson(cloudsUrl({
-        loc: loc, var: SOIL_VARS.join(","),
-        start: "-12 hours", end: "now", int: "1 hour", obtype: "H"
-      })), null, data);
+      harvest(await cloudsJson(cloudsUrl({ loc: loc, var: SOIL_VARS.join(","), data_limit: "last" })), null, data);
       Object.assign(meta, await stationMeta(loc, SOIL_VARS.join(",")));
     } catch (e) { dropped.push("query:" + loc.split(";")[0]); }
   }
 
-  /* A probe that has not moved at all across twelve hourly readings is
-     not reporting; it is stuck. Real soil moisture drifts every hour —
-     it even has a daily temperature wobble. Dropping the value is the
-     right call: showing a dead sensor as a live reading is worse than
-     showing nothing, and it cost a whole evening of misdiagnosis when
-     FLET's frozen 0.44 was mistaken for an irrigated research farm. */
-  const FLAT_MIN_READINGS = 6;
-  function flatlined(d, v) {
-    const sp = d.seen && d.seen[v];
-    return !!(sp && sp.n >= FLAT_MIN_READINGS && sp.max - sp.min === 0);
+  /* Staleness is a question about the CLOCK, not about the value.
+     An earlier version of this flagged any probe whose value hadn't
+     moved across twelve hourly readings and nulled it — which dropped
+     good data from fourteen stations, because ECONet publishes soil
+     moisture to two decimal places. FLET genuinely sat at 0.44 for
+     thirty hours and then moved to 0.45; over six days it reports two
+     distinct values and FRYI reports two. That is coarse precision on a
+     slow-moving quantity, not a dead sensor. Compare the reading's own
+     timestamp instead: that catches a station that has actually stopped
+     and cannot be fooled by precision. */
+  const STALE_HOURS = 6;
+  const stale = [];
+  const nowMs = Date.now();
+  function ageHours(at) {
+    if (!at) return null;
+    /* CLOUDS timestamps are local Eastern with no zone marker. Treating
+       them as UTC would make everything look 4-5 hours old, so parse the
+       wall clock and compare against the same wall clock here. */
+    const m2 = String(at).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+    if (!m2) return null;
+    const asUtc = Date.UTC(+m2[1], +m2[2] - 1, +m2[3], +m2[4], +m2[5]);
+    const nowLocalAsUtc = nowMs + new Date().getTimezoneOffset() * -60000;
+    return (nowLocalAsUtc - asUtc) / 3600000;
   }
 
-  const stale = [];
   const stations = Object.keys(data).map(function (id) {
     const d = data[id], m = meta[id] || {};
-    const flat = {};
-    for (const v of SOIL_VARS) if (flatlined(d, v)) { flat[v] = d[v]; }
-    if (Object.keys(flat).length) {
-      stale.push(id + ":" + Object.keys(flat).map((v) => v + "=" + flat[v]).join(","));
-    }
+    const age = ageHours(d.at);
+    const dead = age != null && age > STALE_HOURS;
+    if (dead) stale.push(id + ":" + Math.round(age) + "h old");
     return {
       id: id,
       name: d.name || m.name || id,
       lat: d.lat != null ? d.lat : (m.lat != null ? m.lat : null),
       lon: d.lon != null ? d.lon : (m.lon != null ? m.lon : null),
       elev: d.elev != null ? d.elev : (m.elev != null ? m.elev : null),
-      soilmoist: flatlined(d, "soilmoist") ? null : normaliseMoisture(d.soilmoist),
-      soilmoist20cm: flatlined(d, "soilmoist20cm") ? null : normaliseMoisture(d.soilmoist20cm),
-      soiltemp: flatlined(d, "soiltemp") || d.soiltemp == null ? null : d.soiltemp,
-      at: d.at || null
+      soilmoist: dead ? null : normaliseMoisture(d.soilmoist),
+      soilmoist20cm: dead ? null : normaliseMoisture(d.soilmoist20cm),
+      soiltemp: dead || d.soiltemp == null ? null : d.soiltemp,
+      at: d.at || null,
+      ageHours: age == null ? null : Math.round(age * 10) / 10
     };
   }).filter(function (s) {
     return s.lat != null && s.lon != null &&

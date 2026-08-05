@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Soil &amp; Exposure Review — Altar Dirt</title>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@900&family=Lora:ital,wght@0,400;0,600;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#111111; --ash:#CCCCCC; --rust:#B85C2A;
+  --earth:#4A3728; --shadow:#2C4A5A; --line:#3A2C22;
+  --dim:#8C7D70;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink);color:var(--ash);font-family:Lora,Georgia,serif;
+     line-height:1.7;padding:28px 20px 80px}
+.wrap{max-width:1000px;margin:0 auto}
+h1,h2,h3{font-family:"Big Shoulders Display",Impact,sans-serif;font-weight:900;
+     text-transform:uppercase;letter-spacing:.02em;line-height:1.05;margin:0}
+h1{font-size:clamp(30px,5.5vw,46px);border-bottom:2px solid var(--rust);padding-bottom:14px;margin-bottom:8px}
+h2{font-size:24px;margin:44px 0 6px;color:var(--ash)}
+h3{font-size:17px;margin:26px 0 4px;color:var(--dim)}
+p{margin:10px 0}
+.lede{color:var(--dim);font-style:italic;margin-bottom:4px}
+code,.num{font-family:"Space Mono",monospace}
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font-family:"Space Mono",monospace;font-size:11px;text-transform:uppercase;
+   letter-spacing:.08em;color:var(--dim);font-weight:700}
+tbody tr:hover{background:rgba(74,55,40,.25)}
+select{font-family:"Space Mono",monospace;font-size:13px;background:#1a1512;color:var(--ash);
+   border:1px solid var(--line);padding:5px 7px;border-radius:2px;cursor:pointer}
+select:focus{outline:2px solid var(--rust);outline-offset:1px}
+select.unset{border-color:var(--rust);color:var(--rust)}
+.sc{font-family:"Space Mono",monospace;font-weight:700;font-size:16px;display:inline-block;min-width:2.6em}
+.delta{font-family:"Space Mono",monospace;font-size:12px;color:var(--dim);margin-left:6px}
+.down{color:var(--rust)}
+.up{color:#7A8A3E}
+.band{font-family:"Space Mono",monospace;font-size:11px;text-transform:uppercase;
+   letter-spacing:.06em;color:var(--dim)}
+.note{border-left:2px solid var(--earth);padding:2px 0 2px 16px;margin:18px 0;color:var(--dim)}
+.warn{border-left-color:var(--rust)}
+button{font-family:"Space Mono",monospace;font-size:13px;background:transparent;color:var(--ash);
+   border:1px solid var(--line);padding:11px 16px;cursor:pointer;letter-spacing:.04em}
+button:hover{border-color:var(--rust);color:var(--rust)}
+#out{width:100%;min-height:200px;background:#0c0a09;color:var(--ash);border:1px solid var(--line);
+   font-family:"Space Mono",monospace;font-size:12px;padding:12px;margin-top:12px;line-height:1.6}
+.pend td:first-child{color:var(--rust)}
+.foot{margin-top:50px;padding-top:18px;border-top:1px solid var(--line);color:var(--dim);font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Soil &amp; Exposure Review</h1>
+<p class="lede">Every soil and exposure value on the page is a guess I made. This is the sheet to correct them.</p>
+
+<div class="note warn">
+<p><strong>Why this matters more than it looks.</strong> Seven of the ten current spots are labelled <code>rocky</code>, and <code>rocky</code> carries a wetness multiplier of <code>0.55</code> — it halves every rain penalty. So one guess of mine is suppressing the page's wet-weather response almost everywhere. Bent Creek and Ride Kanuga both sat at 30% subsoil moisture today: Bent Creek lost 8 points, Kanuga lost 14, purely because I typed <code>rocky</code> for one and <code>clay</code> for the other.</p>
+</div>
+
+<h2>What the numbers do</h2>
+<table>
+<thead><tr><th>Soil</th><th>wet — how hard water hurts</th><th>dry — how fast it sheds</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>clay</code></td><td class="num">1.30</td><td class="num">0.75</td><td>Punished hardest, recovers slowest</td></tr>
+<tr><td><code>loam</code></td><td class="num">1.00</td><td class="num">1.00</td><td>The baseline</td></tr>
+<tr><td><code>sandy</code></td><td class="num">0.70</td><td class="num">1.30</td><td>Sheds well, dries fast</td></tr>
+<tr><td><code>rocky</code></td><td class="num">0.55</td><td class="num">1.40</td><td>Most forgiving of rain by a wide margin</td></tr>
+</tbody>
+</table>
+<table>
+<thead><tr><th>Exposure</th><th>multiplies dry by</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>shaded</code></td><td class="num">0.70</td><td>Holds water longest — north faces, tree cover</td></tr>
+<tr><td><code>mixed</code></td><td class="num">1.00</td><td>Baseline</td></tr>
+<tr><td><code>exposed</code></td><td class="num">1.35</td><td>Sun and wind on it — dries fastest</td></tr>
+</tbody>
+</table>
+
+<h2>Current spots — change and see today's effect</h2>
+<p>Scores are today's real model state (5 Aug 2026). Change a dropdown and the score recomputes.</p>
+<table id="live">
+<thead><tr><th>Spot</th><th>Soil</th><th>Exposure</th><th>Today</th><th>Would be</th></tr></thead>
+<tbody></tbody>
+</table>
+
+<div class="note">
+<p><strong>What this recompute does and doesn't do.</strong> It rescales today's two wetness penalties by the new multipliers, which is exact for this hour. It does <em>not</em> re-run the drying curve backwards — changing <code>dry</code> also changes how much water was left by now, so a real change would shift the number a little further in the same direction. Treat "would be" as the floor of the effect, not the whole of it.</p>
+</div>
+
+<h2>The fifteen new spots</h2>
+<p>Not on the page yet — they need these two values from you. Creek gauges are already scouted for each.</p>
+<table id="pending">
+<thead><tr><th>Spot</th><th>Soil</th><th>Exposure</th><th>Gauge already found</th></tr></thead>
+<tbody></tbody>
+</table>
+
+<h2>Send it back</h2>
+<p>Fill in what you can — partial is fine, I'll take whatever's set — then copy this and paste it to me.</p>
+<button id="copy">Copy the summary</button>
+<textarea id="out" readonly spellcheck="false"></textarea>
+
+<div class="foot">
+<p>Score bands: <span class="num">88+</span> hero &middot; <span class="num">72+</span> good &middot; <span class="num">56+</span> soft &middot; below that it reads poor or slop. Only the wetness terms respond to soil and exposure; the active-rain and frozen-ground terms don't.</p>
+<p>Altar Cycles &middot; built from the live model state, 5 Aug 2026.</p>
+</div>
+
+</div>
+<script>
+var SOIL = { clay:{wet:1.30,dry:0.75}, loam:{wet:1.00,dry:1.00}, sandy:{wet:0.70,dry:1.30}, rocky:{wet:0.55,dry:1.40} };
+var EXP  = { shaded:0.70, mixed:1.00, exposed:1.35 };
+
+/* Today's real per-trail state, read off the live cards on 5 Aug 2026.
+   subPen / watPen are the penalties the page actually applied, so
+   rescaling by the multiplier ratio is exact rather than reverse-engineered. */
+var TRAILS = [
+  { name:"Bent Creek",        place:"Pisgah NF",        soil:"rocky", exp:"shaded", score:92, subPen:8,  watPen:0  },
+  { name:"North Mills River", place:"Trace Ridge",      soil:"rocky", exp:"mixed",  score:99, subPen:0,  watPen:1  },
+  { name:"Pisgah — Lower",    place:"Ranger Station",   soil:"rocky", exp:"shaded", score:91, subPen:7,  watPen:1  },
+  { name:"Pisgah — Upper",    place:"Pisgah Inn",       soil:"rocky", exp:"mixed",  score:90, subPen:7,  watPen:4  },
+  { name:"DuPont",            place:"Cedar Mountain",   soil:"rocky", exp:"mixed",  score:93, subPen:7,  watPen:0  },
+  { name:"Ride Kanuga",       place:"Hendersonville",   soil:"clay",  exp:"mixed",  score:82, subPen:14, watPen:4  },
+  { name:"Wilson Creek",      place:"Collettsville",    soil:"rocky", exp:"mixed",  score:77, subPen:23, watPen:0  },
+  { name:"Hatley Pointe",     place:"Mars Hill",        soil:"clay",  exp:"shaded", score:46, subPen:33, watPen:21 },
+  { name:"Windrock",          place:"Oliver Springs TN",soil:"rocky", exp:"mixed",  score:null, subPen:0, watPen:0 },
+  { name:"Snowshoe",          place:"Snowshoe WV",      soil:"loam",  exp:"shaded", score:null, subPen:0, watPen:0 }
+];
+
+var PENDING = [
+  ["Big Ivy",                  "Ivy R nr Marshall — 9.2 mi (watershed, not nearest)"],
+  ["Stony Fork Park",          "Hominy Cr — 6.0 mi"],
+  ["Mills River Valley Overlook", "not yet scouted"],
+  ["Bent Creek Gap",           "needs a better Plus Code from you"],
+  ["Green River Game Lands",   "not yet scouted"],
+  ["Berm Park",                "Pigeon R nr Canton — 1.7 mi"],
+  ["Beacon Park",              "not yet scouted"],
+  ["Sugar Mountain",           "Buckeye Cr — 6.4 mi"],
+  ["Beech Mountain",           "Buckeye Cr abv lake — 1.2 mi"],
+  ["Old Fort",                 "Catawba R — 7.8 mi; needs a riding-area coordinate"],
+  ["Mt Mitchell",              "South Toe R nr Celo — 6.5 mi"],
+  ["Ride Rock Creek",          "Big Falls Cr nr Tigerville SC — 3.9 mi"],
+  ["WildSide Bike Park",       "W Prong Little Pigeon — 6.3 mi"],
+  ["Jarrod's Place",           "Chattooga R at Summerville — 1.1 mi"]
+];
+
+function band(s){
+  if (s === null) return "";
+  if (s >= 88) return "hero";
+  if (s >= 72) return "good";
+  if (s >= 56) return "soft";
+  if (s >= 40) return "poor";
+  return "slop";
+}
+function sel(opts, val, cls){
+  var h = '<select class="' + (cls||"") + '">';
+  if (!val) h += '<option value="">— pick —</option>';
+  opts.forEach(function(o){
+    h += '<option value="' + o + '"' + (o === val ? " selected" : "") + ">" + o + "</option>";
+  });
+  return h + "</select>";
+}
+
+var liveBody = document.querySelector("#live tbody");
+TRAILS.forEach(function(t, i){
+  var tr = document.createElement("tr");
+  tr.innerHTML =
+    "<td><strong>" + t.name + "</strong><br><span class='band'>" + t.place + "</span></td>" +
+    "<td>" + sel(Object.keys(SOIL), t.soil) + "</td>" +
+    "<td>" + sel(Object.keys(EXP), t.exp) + "</td>" +
+    "<td><span class='sc'>" + (t.score === null ? "—" : t.score) + "</span>" +
+      "<span class='band'>" + band(t.score) + "</span></td>" +
+    "<td class='res'>—</td>";
+  liveBody.appendChild(tr);
+  tr.querySelectorAll("select").forEach(function(s){
+    s.addEventListener("change", function(){ recompute(i, tr); });
+  });
+});
+
+function recompute(i, tr){
+  var t = TRAILS[i];
+  var ss = tr.querySelectorAll("select");
+  var soil = ss[0].value, exp = ss[1].value;
+  t.pickSoil = soil; t.pickExp = exp;
+  var cell = tr.querySelector(".res");
+  if (t.score === null){ cell.innerHTML = "<span class='band'>not loaded today</span>"; return; }
+  var ratio = SOIL[soil].wet / SOIL[t.soil].wet;
+  var s = Math.max(0, Math.min(100, Math.round(t.score + t.subPen + t.watPen - (t.subPen + t.watPen) * ratio)));
+  var d = s - t.score;
+  var arrow = d === 0 ? "no change" : (d > 0 ? "+" + d : String(d));
+  cell.innerHTML = "<span class='sc'>" + s + "</span><span class='band'>" + band(s) + "</span>" +
+    "<span class='delta " + (d < 0 ? "down" : d > 0 ? "up" : "") + "'>" + arrow + "</span>";
+}
+TRAILS.forEach(function(t,i){ recompute(i, liveBody.children[i]); });
+
+var pendBody = document.querySelector("#pending tbody");
+PENDING.forEach(function(p){
+  var tr = document.createElement("tr");
+  tr.className = "pend";
+  tr.innerHTML = "<td>" + p[0] + "</td>" +
+    "<td>" + sel(Object.keys(SOIL), "", "unset") + "</td>" +
+    "<td>" + sel(Object.keys(EXP), "", "unset") + "</td>" +
+    "<td><span class='band'>" + p[1] + "</span></td>";
+  pendBody.appendChild(tr);
+  tr.querySelectorAll("select").forEach(function(s){
+    s.addEventListener("change", function(){ s.classList.toggle("unset", !s.value); build(); });
+  });
+});
+
+function build(){
+  var lines = ["SOIL / EXPOSURE — Matt's corrections", ""];
+  lines.push("CURRENT SPOTS (only the ones I changed matter):");
+  TRAILS.forEach(function(t, i){
+    var ss = liveBody.children[i].querySelectorAll("select");
+    var a = ss[0].value, b = ss[1].value;
+    var changed = (a !== t.soil || b !== t.exp);
+    lines.push("  " + (changed ? "CHANGE " : "  keep  ") + t.name +
+      ": " + a + " / " + b + (changed ? "   (was " + t.soil + " / " + t.exp + ")" : ""));
+  });
+  lines.push("");
+  lines.push("NEW SPOTS:");
+  PENDING.forEach(function(p, i){
+    var ss = pendBody.children[i].querySelectorAll("select");
+    var a = ss[0].value, b = ss[1].value;
+    lines.push("  " + p[0] + ": " + (a && b ? a + " / " + b : (a || b ? (a || "?") + " / " + (b || "?") : "— still thinking")));
+  });
+  document.getElementById("out").value = lines.join("\n");
+}
+liveBody.querySelectorAll("select").forEach(function(s){ s.addEventListener("change", build); });
+build();
+
+document.getElementById("copy").addEventListener("click", function(){
+  var el = document.getElementById("out");
+  el.select(); el.setSelectionRange(0, 99999);
+  try { document.execCommand("copy"); this.textContent = "Copied — paste it to me"; }
+  catch(e){ this.textContent = "Select the text below and copy"; }
+  var b = this;
+  setTimeout(function(){ b.textContent = "Copy the summary"; }, 2600);
+});
+</script>
+</body>
+</html>

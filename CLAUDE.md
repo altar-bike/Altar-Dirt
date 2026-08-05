@@ -580,10 +580,10 @@ kind of call to take from him rather than the map.
 
 ### The soil sensors do not measure what the cards imply (4 Aug 2026)
 
-Investigated after Matt questioned Bent Creek's 82. Three findings, all
-verified against `/soil/raw`, all of which weaken the measured-soil
-story considerably. **Do not treat station soil moisture as ground truth
-until these are resolved.**
+Investigated after Matt questioned Bent Creek's 82. Three findings —
+**two hold, one was my error and is retracted below.** The two that hold
+still weaken the measured-soil story considerably. **Do not treat station
+soil moisture as ground truth until they are resolved.**
 
 **1. `soilmoist` and `soilmoist20cm` are the same sensor.** Queried
 separately for `0246CA`, CLOUDS returns byte-identical values under both
@@ -593,15 +593,29 @@ card's "at 20cm" label is inferred from which key came back non-null —
 it is not a claim CLOUDS supports. `normaliseMoisture` and the
 surface/20cm branch in `measuredHtml` are both built on this assumption.
 
-**2. FLET is flatlined.** It returned exactly `0.44` for both variables
-every hour for 30 straight hours. A live probe does not hold two
-decimal places for thirty hours. The earlier note below — that FLET
-reads wet because it is an irrigated research farm — is probably wrong;
-it reads wet because it is **stuck**. FLET is displayed on Pisgah —
-Lower and North Mills River as "44% water at 20cm", i.e. we are showing
-a dead sensor as a live reading. Showing nothing would be better, per
-the project's own rule about degrading to nothing rather than to
-something misleading.
+**2. ~~FLET is flatlined.~~ WRONG — retracted the same evening.** I saw
+FLET hold exactly `0.44` for thirty hours, concluded the probe was stuck,
+shipped a detector that nulled any value not moving across twelve hourly
+readings, and it flagged **fourteen** ECONet stations at once — including
+FRYI, which Pisgah — Upper depends on. Fourteen simultaneous failures is
+not a plausible reading of the evidence, and checking a six-day window
+settled it: FLET reports two distinct values (0.44, 0.45), FRYI two
+(0.25, 0.26), BURN seven (0.26–0.31). **ECONet publishes soil moisture
+to two decimal places, and soil moisture is slow.** Coarse precision on
+a slowly-drifting quantity looks exactly like a dead sensor over a short
+window. The sensors are fine and the irrigated-research-farm explanation
+for FLET's wetness stands.
+
+Reverted. Staleness is now judged on the reading's own **timestamp**
+(`STALE_HOURS = 6`), which is the question actually being asked and
+cannot be fooled by precision. `/soil` reports `ageHours` per station
+and lists genuinely stale ones in `stale`.
+
+The lesson, which is the same one as the WebFetch truncation earlier the
+same evening: **when a detector fires on many subjects at once, suspect
+the detector.** Both mistakes had the identical shape — a confident
+causal story built on a window too small to distinguish two explanations,
+written up as fact before being checked against a wider one.
 
 **3. The sensor cannot see the rain that decides a trail.** 0.92 in
 fell at `0246CA` between 18:00 and 21:00 on 3 Aug. The station's soil
