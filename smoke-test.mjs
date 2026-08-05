@@ -157,12 +157,30 @@ await browser.close();
 if (!r.measured.some((l) => l.startsWith("rain"))) problems.push("measured rain row missing on Bent Creek");
 if (!/gauge caught/.test(r.meaning || "")) problems.push("gauge-vs-forecast sentence missing");
 
-/* The same stub gauge sits 5.4 mi from North Mills River — outside the
-   scoring threshold, inside the watch tier. The rain? warning is the
-   only defence a gauge-less trail has against a forecast miss, so its
-   absence is a failure, not a cosmetic difference. */
-if (!r.millsRows.some((l) => /rain\?/.test(l) && /Too far off to score from/.test(l)))
-  problems.push("tier-2 rain? warning missing on North Mills River");
+/* The same stub gauge sits 5.4 mi from North Mills River: outside
+   WX_MAX_MI (3.5) but inside WX_TIER2_MI (6), so as of 5 Aug 2026 it
+   SCORES the trail instead of merely warning about it. Before that change
+   this assertion expected the `rain?` watch row — the reason it moved is
+   that falling back to forecast was measured to be the worse failure
+   (Open-Meteo caught 9% of DuPont's rain), not because the warning was
+   wrong.
+
+   Two things have to hold. The row must be there, and it must be honest
+   that it came from further out — a tier-2 number rendered
+   indistinguishably from a gauge in the car park is the regression this
+   guards against. */
+if (!r.millsRows.some((l) => /rain·2/.test(l)))
+  problems.push("tier-2 scoring rain row missing on North Mills River");
+if (!r.millsRows.some((l) => /read it as the area, not the trail/.test(l)))
+  problems.push("tier-2 row on North Mills River is not labelled as second tier");
+/* Having scored it, the watch row is now wrong to show — it says "too far
+   off to score from" about the gauge we just scored from. */
+if (r.millsRows.some((l) => /rain\?/.test(l)))
+  problems.push("North Mills River shows both a tier-2 score and a rain? watch row");
+/* And the trail with a gauge 0.25 mi out must NOT be marked tier 2, or
+   the fallback has swallowed the primary path. */
+if (r.measured.some((l) => /rain·2/.test(l)))
+  problems.push("Bent Creek scored tier 2 despite a gauge 0.25 mi away");
 
 /* Kanuga's only measured rain is the volunteer daily observer. */
 if (!r.kanugaRows.some((l) => /rain·d/.test(l) && /volunteer daily gauge/.test(l)))

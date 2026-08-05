@@ -1,0 +1,2145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trail Conditions — Altar Cycles</title>
+<meta name="description" content="What the dirt is doing right now at the trails and bike parks we ride around Asheville. Updated hourly.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@900&family=Lora:ital,wght@0,400;0,600;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<!-- ==================================================================
+     SETTINGS
+     These are the only lines you might want to change. Open this file
+     in TextEdit (Mac) or Notepad (Windows), edit between the quote
+     marks, save. Don't touch anything below this block.
+     ================================================================== -->
+<script>
+window.ALTAR_SETTINGS = {
+
+  // 1. Where "request a riding area" messages get emailed.
+  requestEmail: "matt@altar.bike",
+
+  // 2. Rider ratings. This is the URL of the feedback service on
+  //    Railway (see feedback-api/README.md). While it's empty, the
+  //    rating buttons simply don't appear.
+  feedbackEndpoint: "https://altar-dirt-production.up.railway.app/",
+
+  // 3. Who sees the rating buttons. "" = everyone. Set to "crew" to
+  //    hide them unless the URL has ?crew=1 (ratings from names not on
+  //    the CREW list are excluded from calibration either way).
+  crewParam: "",
+
+  // 4. Measured soil data from NC State's ECONet, via our own service
+  //    (the CLOUDS key has to stay server-side, so this points at the
+  //    Railway proxy, never at api.climate.ncsu.edu directly). Leave
+  //    blank to turn the station readings off.
+  soilStationEndpoint: "https://altar-dirt-production.up.railway.app/soil"
+
+};
+</script>
+
+<!-- ==================================================================
+     ALTAR CYCLES — TRAIL CONDITIONS
+     Self-contained. No build step, no dependencies, no API key.
+     Weather data: Open-Meteo (see LICENSING note in README.md).
+     Edit the TRAILS list in the script block at the bottom.
+     ================================================================== -->
+
+<style>
+/* All selectors scoped to #dirt-app so nothing leaks into the theme. */
+#dirt-app{
+  /* ---- Altar palette ---- */
+  --forge:#111111;      /* Forge Black   — background */
+  --ash:#CCCCCC;        /* Ash White     — body text */
+  --rust:#B85C2A;       /* Altar Rust    — accent */
+  --earth:#4A3728;      /* Trail Earth   — secondary surface */
+  --pisgah:#2C4A5A;     /* Pisgah Shadow — tertiary */
+  /* derived from the palette, not invented grays */
+  --panel:#241B15;      /* Trail Earth, darkened — card fill */
+  --line:#3A2C22;       /* Trail Earth, darkened — hairlines */
+  --muted:#8C7D70;      /* warm muted text */
+
+  background:var(--forge);
+  color:var(--ash);
+  font-family:'Lora',Georgia,serif;
+  font-size:16px;
+  line-height:1.7;
+  padding:32px 20px 56px;
+  box-sizing:border-box;
+}
+#dirt-app *{box-sizing:border-box;}
+#dirt-app a{color:var(--rust);text-decoration:none;border-bottom:1px solid rgba(184,92,42,.4);}
+#dirt-app a:hover{border-bottom-color:var(--rust);}
+#dirt-app button:focus-visible{outline:2px solid var(--rust);outline-offset:3px;}
+
+/* ---------- type ---------- */
+#dirt-app .da-display{
+  font-family:'Big Shoulders Display',Arial,sans-serif;
+  font-weight:900;text-transform:uppercase;margin:0;line-height:.92;
+}
+#dirt-app .da-mono{font-family:'Space Mono',monospace;}
+
+/* ---------- header ---------- */
+#dirt-app .da-head{
+  display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:flex-end;
+  border-bottom:2px solid var(--rust);padding-bottom:16px;margin-bottom:20px;
+}
+#dirt-app .da-head h1{font-size:clamp(38px,7vw,64px);letter-spacing:.01em;}
+#dirt-app .da-head p{margin:8px 0 0;max-width:52ch;font-size:15px;color:var(--muted);}
+#dirt-app .da-refresh{
+  font-family:'Space Mono',monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  background:transparent;color:var(--ash);border:1px solid var(--line);padding:10px 14px;cursor:pointer;
+  transition:border-color .15s,color .15s;
+}
+#dirt-app .da-refresh:hover{border-color:var(--rust);color:var(--rust);}
+#dirt-app .da-refresh[disabled]{opacity:.45;cursor:default;}
+
+/* ---------- verdict ---------- */
+#dirt-app .da-verdict{
+  display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;
+  background:var(--panel);border-left:3px solid var(--rust);
+  padding:14px 18px;margin-bottom:24px;
+}
+#dirt-app .da-verdict .k{
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--muted);
+}
+#dirt-app .da-verdict .n{
+  font-family:'Big Shoulders Display',Arial,sans-serif;font-weight:900;
+  text-transform:uppercase;font-size:26px;line-height:1;
+}
+#dirt-app .da-verdict .s{font-family:'Space Mono',monospace;font-size:12px;color:var(--muted);}
+
+/* ---------- grid + card ---------- */
+#dirt-app .da-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:18px;}
+#dirt-app .da-card{background:var(--panel);border:1px solid var(--line);padding:18px 20px 16px;}
+#dirt-app .da-card h2{font-size:25px;letter-spacing:.015em;}
+#dirt-app .da-place{
+  font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted);margin:5px 0 0;
+}
+
+#dirt-app .da-readout{display:flex;gap:16px;align-items:center;margin:18px 0 10px;}
+#dirt-app .da-score{
+  font-family:'Space Mono',monospace;font-weight:700;font-size:52px;line-height:.85;
+  min-width:82px;font-variant-numeric:tabular-nums;transition:color .15s;
+}
+#dirt-app .da-state{
+  display:inline-block;font-family:'Space Mono',monospace;font-size:11px;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;border:1px solid;padding:4px 8px;
+}
+#dirt-app .da-blurb{margin:8px 0 0;font-size:14px;line-height:1.55;color:var(--ash);}
+#dirt-app .da-window{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--muted);margin:0 0 12px;}
+#dirt-app .da-window b{font-weight:700;}
+
+/* ---------- the day strip ---------- */
+#dirt-app .da-strip{
+  display:flex;gap:2px;align-items:flex-end;height:62px;
+  padding-bottom:6px;border-bottom:1px solid var(--line);
+}
+#dirt-app .da-slot{flex:1;height:100%;display:flex;align-items:flex-end;position:relative;cursor:crosshair;}
+#dirt-app .da-bar{width:100%;transition:opacity .15s;}
+#dirt-app .da-bracket{position:absolute;left:0;right:0;bottom:-6px;height:2px;background:var(--rust);}
+#dirt-app .da-axis{
+  display:flex;justify-content:space-between;font-family:'Space Mono',monospace;
+  font-size:9.5px;letter-spacing:.06em;color:var(--muted);margin:7px 0 14px;
+}
+
+/* ---------- facts ---------- */
+#dirt-app .da-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(56px,1fr));gap:10px;margin:0 0 12px;}
+#dirt-app .da-facts dt{
+  font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted);
+}
+#dirt-app .da-facts dd{
+  margin:3px 0 0;font-family:'Space Mono',monospace;font-size:13px;
+  color:var(--ash);font-variant-numeric:tabular-nums;
+}
+
+/* ---------- observed data: alerts, gauges, stations ---------- */
+#dirt-app .da-alertbox:empty,#dirt-app .da-measured:empty{display:none;}
+#dirt-app .da-alert{
+  font-family:'Space Mono',monospace;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--rust);border:1px solid var(--rust);border-left-width:3px;
+  padding:7px 10px;margin:0 0 9px;line-height:1.45;
+}
+#dirt-app .da-alert b{font-weight:700;}
+#dirt-app .da-measured-in{border-top:1px solid var(--line);margin-top:12px;padding-top:11px;}
+#dirt-app .da-measured-in ul{list-style:none;margin:0;padding:0;}
+#dirt-app .da-measured-in li{display:flex;gap:10px;font-size:13.5px;line-height:1.5;color:var(--ash);margin-bottom:6px;}
+#dirt-app .da-measured-in .da-w{min-width:54px;}
+#dirt-app .da-measured-in .da-sub{margin-top:0;}
+#dirt-app .da-meaning{font-size:13.5px;line-height:1.7;color:var(--ash);margin:10px 0 0;}
+
+/* ---------- disclosure ---------- */
+#dirt-app .da-toggle{
+  width:100%;text-align:left;background:transparent;border:0;border-top:1px solid var(--line);
+  padding:11px 0 0;color:var(--muted);cursor:pointer;
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+}
+#dirt-app .da-toggle:hover{color:var(--rust);}
+#dirt-app .da-why{padding-top:12px;}
+#dirt-app .da-why ul{list-style:none;margin:0;padding:0;}
+#dirt-app .da-why li{display:flex;gap:10px;font-size:13.5px;line-height:1.5;color:var(--ash);margin-bottom:6px;}
+#dirt-app .da-w{
+  font-family:'Space Mono',monospace;font-size:11.5px;min-width:34px;text-align:right;
+  flex:none;padding-top:2px;font-variant-numeric:tabular-nums;
+}
+#dirt-app .da-outlook{border-top:1px solid var(--line);margin-top:12px;padding-top:11px;}
+#dirt-app .da-orow{
+  display:grid;grid-template-columns:42px 1fr 30px auto;gap:10px;align-items:center;
+  font-family:'Space Mono',monospace;font-size:10.5px;color:var(--muted);margin-bottom:7px;
+}
+#dirt-app .da-obar{height:6px;background:rgba(255,255,255,.07);overflow:hidden;}
+#dirt-app .da-obar i{display:block;height:100%;}
+#dirt-app .da-note{font-size:12.5px;line-height:1.5;color:var(--muted);margin:10px 0 0;font-style:italic;}
+
+/* ---------- states ---------- */
+#dirt-app .da-msg{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--muted);margin:16px 0;}
+#dirt-app .da-err{font-size:13.5px;color:var(--rust);margin:14px 0 0;}
+#dirt-app .da-retry{
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  background:transparent;border:1px solid var(--line);color:var(--ash);padding:7px 11px;
+  margin-top:10px;cursor:pointer;
+}
+#dirt-app .da-retry:hover{border-color:var(--rust);color:var(--rust);}
+
+/* ---------- worth the drive: loaded on request ---------- */
+#dirt-app .da-away{border-top:1px solid var(--line);margin-top:34px;padding-top:22px;}
+#dirt-app .da-away h2{font-size:30px;letter-spacing:.015em;}
+#dirt-app .da-away .lede{margin:8px 0 16px;font-size:15px;color:var(--muted);max-width:56ch;}
+#dirt-app .da-away-btn{
+  font-family:'Space Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.16em;
+  text-transform:uppercase;background:transparent;color:var(--ash);border:1px solid var(--line);
+  padding:12px 20px;cursor:pointer;margin-bottom:20px;transition:border-color .15s,color .15s;
+}
+#dirt-app .da-away-btn:hover{border-color:var(--rust);color:var(--rust);}
+#dirt-app .da-away-btn[disabled]{opacity:.45;cursor:default;}
+
+/* ---------- request a riding area ---------- */
+#dirt-app .da-ask{
+  background:var(--panel);border-left:3px solid var(--rust);
+  padding:22px 24px 24px;margin-top:28px;
+}
+#dirt-app .da-ask h2{font-size:32px;letter-spacing:.015em;}
+#dirt-app .da-ask .lede{margin:8px 0 20px;font-size:15px;color:var(--ash);max-width:56ch;}
+#dirt-app .da-ask-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px;max-width:640px;}
+#dirt-app .da-ask-grid .wide{grid-column:1/-1;}
+#dirt-app .da-ask label{display:block;}
+#dirt-app .da-ask .lab{
+  display:block;font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:6px;
+}
+#dirt-app .da-ask input,#dirt-app .da-ask textarea{
+  width:100%;background:var(--forge);border:1px solid var(--line);color:var(--ash);
+  font-family:'Lora',Georgia,serif;font-size:14.5px;padding:9px 11px;
+}
+#dirt-app .da-ask textarea{resize:vertical;min-height:74px;line-height:1.5;}
+#dirt-app .da-ask input:focus,#dirt-app .da-ask textarea:focus{outline:none;border-color:var(--rust);}
+#dirt-app .da-ask input::placeholder,#dirt-app .da-ask textarea::placeholder{color:#6B5F55;}
+#dirt-app .da-send{
+  margin-top:18px;font-family:'Space Mono',monospace;font-size:11px;font-weight:700;
+  letter-spacing:.16em;text-transform:uppercase;background:var(--rust);color:var(--forge);
+  border:1px solid var(--rust);padding:12px 22px;cursor:pointer;transition:background .15s,color .15s;
+}
+#dirt-app .da-send:hover{background:transparent;color:var(--rust);}
+#dirt-app .da-ask-msg{margin:12px 0 0;font-size:13.5px;line-height:1.5;min-height:1px;}
+#dirt-app .da-ask-msg.err{color:var(--rust);}
+#dirt-app .da-ask-msg.ok{color:#7A8A3E;}
+
+@media (max-width:560px){
+  #dirt-app .da-ask{padding:18px 18px 20px;}
+  #dirt-app .da-ask-grid{grid-template-columns:1fr;}
+}
+
+/* ---------- rider calibration ---------- */
+#dirt-app .da-rate{border-top:1px solid var(--line);margin-top:11px;padding-top:11px;}
+#dirt-app .da-rate-open{
+  background:transparent;border:0;padding:0;cursor:pointer;color:var(--muted);
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+}
+#dirt-app .da-rate-open:hover{color:var(--rust);}
+#dirt-app .da-rate-q{font-size:13.5px;line-height:1.5;margin:0 0 10px;color:var(--ash);}
+#dirt-app .da-sub{
+  font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--muted);margin:12px 0 7px;
+}
+#dirt-app .da-chips{display:flex;flex-wrap:wrap;gap:6px;}
+#dirt-app .da-chip{
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  background:transparent;border:1px solid var(--line);color:var(--ash);
+  padding:8px 11px;cursor:pointer;transition:border-color .12s,background .12s,color .12s;
+}
+#dirt-app .da-chip:hover{border-color:var(--rust);color:var(--rust);}
+#dirt-app .da-chip[aria-pressed="true"]{border-color:var(--rust);background:var(--rust);color:var(--forge);}
+/* Multi-select reads as tinted rather than filled, so a group you can
+   pick several from never looks like a group you can only pick one from. */
+#dirt-app .da-multi .da-chip[aria-pressed="true"]{
+  background:rgba(184,92,42,.20);color:var(--rust);border-color:var(--rust);
+}
+#dirt-app .da-rate input{
+  width:100%;background:var(--forge);border:1px solid var(--line);color:var(--ash);
+  font-family:'Lora',Georgia,serif;font-size:14px;padding:9px 11px;margin-top:12px;
+}
+#dirt-app .da-rate input:focus{outline:none;border-color:var(--rust);}
+#dirt-app .da-rate input::placeholder{color:#6B5F55;}
+#dirt-app .da-rate-send{
+  margin-top:14px;font-family:'Space Mono',monospace;font-size:10.5px;font-weight:700;
+  letter-spacing:.16em;text-transform:uppercase;background:var(--rust);color:var(--forge);
+  border:1px solid var(--rust);padding:10px 18px;cursor:pointer;transition:background .15s,color .15s;
+}
+#dirt-app .da-rate-send:hover{background:transparent;color:var(--rust);}
+#dirt-app .da-rate-msg{font-size:12.5px;line-height:1.45;margin:10px 0 0;}
+#dirt-app .da-rate-msg.ok{color:#7A8A3E;}
+#dirt-app .da-rate-msg.err{color:var(--rust);}
+
+/* ---------- footer ---------- */
+#dirt-app .da-foot{margin-top:34px;padding-top:18px;border-top:1px solid var(--line);}
+#dirt-app .da-legend{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:16px;}
+#dirt-app .da-legend span{
+  display:flex;align-items:center;gap:6px;font-family:'Space Mono',monospace;
+  font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);
+}
+#dirt-app .da-legend i{width:10px;height:10px;flex:none;}
+#dirt-app .da-foot p{margin:0 0 10px;font-size:13.5px;line-height:1.65;color:var(--muted);max-width:70ch;}
+
+@media (max-width:560px){
+  #dirt-app{padding:24px 16px 40px;}
+  #dirt-app .da-grid{grid-template-columns:1fr;}
+  #dirt-app .da-score{font-size:44px;min-width:70px;}
+}
+@media (prefers-reduced-motion:reduce){#dirt-app *{transition:none!important;}}
+</style>
+</head>
+<body>
+
+<div id="dirt-app">
+  <header class="da-head">
+    <div>
+      <h1 class="da-display">Trail Conditions</h1>
+      <p>What the dirt is doing right now at the places we ride. Rain in, drying out, scored hour by hour.</p>
+    </div>
+    <button class="da-refresh" id="da-refresh" type="button">Refresh</button>
+  </header>
+
+  <div class="da-verdict" id="da-verdict" hidden></div>
+  <main class="da-grid" id="da-grid"></main>
+
+  <section class="da-away" id="da-away">
+    <h2 class="da-display">Worth the drive</h2>
+    <p class="lede">Out of state, so we don't go and get these unless you're actually
+      thinking about the drive.</p>
+    <button class="da-away-btn" id="da-away-btn" type="button">Load conditions</button>
+    <div class="da-grid" id="da-away-grid" hidden></div>
+  </section>
+
+  <section class="da-ask">
+    <h2 class="da-display">Missing somewhere?</h2>
+    <p class="lede">Tell us where you ride and we'll add it. The nearest town is enough &mdash; coordinates help, and so does anything you know about how the dirt behaves after rain.</p>
+    <form id="da-ask-form" novalidate>
+      <div class="da-ask-grid">
+        <label>
+          <span class="lab">Riding area</span>
+          <input type="text" id="ask-area" name="area" placeholder="Kitsuma, Heartbreak Ridge&hellip;" autocomplete="off">
+        </label>
+        <label>
+          <span class="lab">Nearest town</span>
+          <input type="text" id="ask-town" name="town" placeholder="Old Fort, NC" autocomplete="off">
+        </label>
+        <label class="wide">
+          <span class="lab">What the dirt does &mdash; optional</span>
+          <textarea id="ask-dirt" name="dirt" placeholder="Greasy roots for two days after rain, then it's perfect. North-facing most of the way up."></textarea>
+        </label>
+        <label class="wide">
+          <span class="lab">Your email &mdash; optional, only if you want an answer</span>
+          <input type="email" id="ask-email" name="email" placeholder="you@example.com" autocomplete="email">
+        </label>
+      </div>
+      <button type="submit" class="da-send">Send it</button>
+      <p class="da-ask-msg" id="da-ask-msg" role="status" aria-live="polite"></p>
+    </form>
+  </section>
+
+  <footer class="da-foot">
+    <div class="da-legend" id="da-legend"></div>
+    <p><b>This is a model, not a trail report.</b> Soil moisture and rainfall come from forecast data, not from someone standing on the trail. If a trail is closed, gated, or it rained harder than the model thinks, the model is wrong and your eyes are right. Check the land manager before you drive.</p>
+    <p class="da-mono" style="font-size:11px;letter-spacing:.06em;">
+      Weather data by <a href="https://open-meteo.com/">Open-Meteo.com</a> — CC BY 4.0.
+      Rideability scores are Altar's own model built on top of that data.
+      Watches and warnings from the <a href="https://www.weather.gov/">National Weather Service</a>.
+      Creek levels from <a href="https://waterdata.usgs.gov/">USGS Water Data</a>.
+      Station soil readings from the <a href="https://econet.climate.ncsu.edu/">NC ECONet</a>,
+      NC State Climate Office.
+      <span id="da-stamp"></span>
+    </p>
+    <!-- Degraded data sources, named in public. The /soil payload has
+         carried `dropped` and `stale` diagnostics for a while and nothing
+         on the page ever read them, so CoCoRaHS could return zero rows
+         indefinitely and the only symptom was a row quietly not drawing.
+         A source that has failed should say so where the numbers are. -->
+    <p class="da-mono" id="da-degraded"
+       style="font-size:11px;letter-spacing:.06em;color:#B85C2A;display:none;"></p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ==================================================================
+     1. TRAILS — edit this list. Coordinates from Google Maps
+        (right-click a spot, click the lat/long to copy).
+        soil:     "clay" | "clayrock" | "loam" | "blend" | "sandy" | "rocky"
+                  (listed wettest-holding to best-draining — see SOILS below.
+                   "clayrock" is clay with heavy rock through it; "blend" is
+                   brown dirt, clay and rock together.)
+        exposure: "shaded" | "mixed" | "exposed"
+     ================================================================== */
+  /* zone  : NWS forecast zone, used to pull weather alerts (one call for all
+              trails). Looked up from api.weather.gov/points/<lat>,<lon>.
+     czone : NWS county zone. Flood products are often issued by county
+             rather than forecast zone, so both are queried.
+     gauge : USGS stream gauge site number, or null when nothing close
+             enough is representative. gaugeMi is its distance in miles.
+             Gauges were chosen from active USGS sites with realtime data;
+             see the GAUGES table below for names and normals.
+     station: optional ECONet station id to pin. Leave it off and the
+             page takes the closest one, breaking near-ties downhill.
+             Set it when local knowledge beats the map.
+     away  : true for anything out of state. These are not fetched on
+             load — they sit behind the "Worth the drive" button, and
+             they stay out of the best-bet verdict, which is about
+             where to ride today rather than where to drive. */
+  var TRAILS = [
+    { name: "Bent Creek",       place: "Pisgah NF, NC",         lat: 35.4919, lon: -82.6285, soil: "clay",     exposure: "shaded",
+      zone: "NCZ053", czone: "NCC021", gauge: "0344878100", gaugeMi: 5.1 },
+    { name: "North Mills River", place: "Trace Ridge, NC",       lat: 35.4204, lon: -82.6567, soil: "blend",    exposure: "mixed",
+      zone: "NCZ065", czone: "NCC089", gauge: "03446000",   gaugeMi: 3.8 },
+    /* Pisgah split in two (Matt, 4 Aug 2026): one valley sensor was
+       standing in for a 3,000ft spread. Lower anchors on the Ranger
+       Station (OSM: Pisgah District Ranger Station, 35.2848,-82.7270),
+       station WAS pinned to FLET — Matt's read is that Black Mountain,
+       Clawhammer and Bennett Gap sit nearer the valley than the summit,
+       and FLET was the only valley-elevation probe in reach.
+
+       Pin removed 5 Aug 2026: FLET's moisture sensor is irrigated
+       research plots (see SOIL_PROBE_BLOCK) and it sits 13.7 mi away, not
+       the 6 the card implied. Nothing good replaces it. Unpinned, this
+       card falls to FRYI at 8 mi — which is 5,320 ft against a trailhead
+       around 2,200, so the elevation mismatch the Pisgah split existed to
+       fix is back on the soil row specifically. Rain is unaffected and
+       excellent: SMPN7 sits 1.6 mi out and scores tier 1. Treat the soil
+       row on this card as regional, and if a valley probe ever appears
+       inside ~10 mi, pin it. */
+    { name: "Pisgah — Lower",   place: "Ranger Station, NC",     lat: 35.2848, lon: -82.7270, soil: "clayrock", exposure: "shaded",
+      zone: "NCZ064", czone: "NCC175", gauge: "03441000",   gaugeMi: 1.4 },
+    /* Upper anchors on the Pisgah Inn (OSM: 35.4029,-82.7538, BRP mp
+       408.6). No station pin: Frying Pan Mountain (FRYI, 5,320ft) is
+       1.3 mi away, wins naturally, and carries an hourly rain gauge —
+       so the high country scores from measured rain at its own
+       elevation instead of a valley forecast. Davidson River gauge kept
+       for the drainage, distance shown honestly. Exposure "mixed" is my
+       call for a ridgeline, not Matt's — flag it to him. */
+    { name: "Pisgah — Upper",   place: "Pisgah Inn, NC",         lat: 35.4029, lon: -82.7538, soil: "blend",    exposure: "mixed",
+      zone: "NCZ064", czone: "NCC175", gauge: "03441000",   gaugeMi: 9.4 },
+    { name: "DuPont",           place: "Cedar Mountain, NC",     lat: 35.1990, lon: -82.6180, soil: "clay",     exposure: "mixed",
+      zone: "NCZ064", czone: "NCC175", gauge: "03441000",   gaugeMi: 7.1 },
+    { name: "Ride Kanuga",      place: "Hendersonville, NC",     lat: 35.2860, lon: -82.5290, soil: "clay",     exposure: "mixed",
+      zone: "NCZ065", czone: "NCC089", gauge: "0344632850", gaugeMi: 5.0 },
+    { name: "Wilson Creek",     place: "Collettsville, NC",      lat: 35.9590, lon: -81.7613, soil: "rocky",    exposure: "mixed",
+      zone: "NCZ501", czone: "NCC027", gauge: "02140510",   gaugeMi: 4.9 },
+    /* Hatley Pointe is loam and soft dirt, not clay — Matt, 5 Aug 2026: the
+       trail is new, so it hasn't packed down yet. Worth revisiting once it
+       has a couple of seasons on it. */
+    { name: "Hatley Pointe",    place: "Mars Hill, NC",          lat: 35.9547, lon: -82.5088, soil: "loam",     exposure: "shaded",
+      zone: "NCZ048", czone: "NCC115", gauge: null,         gaugeMi: 0   },
+    /* away: out of state, so not fetched until someone asks. Keeps the
+       page quick and keeps us off Open-Meteo for trips nobody's taking. */
+    { name: "Windrock",         place: "Oliver Springs, TN",     lat: 36.0640, lon: -84.3390, soil: "clay",     exposure: "mixed",
+      zone: "TNZ036", czone: "TNC001", gauge: null,         gaugeMi: 0,   away: true },
+    { name: "Snowshoe",         place: "Snowshoe, WV",           lat: 38.4120, lon: -79.9960, soil: "loam",     exposure: "shaded",
+      zone: "WVZ523", czone: "WVC075", gauge: "03180900",   gaugeMi: 5.7, away: true }
+  ];
+
+  /* ==================================================================
+     Stream gauges. Creek level is a direct read on how soaked a
+     watershed is — and unlike the soil model, it is measured, not
+     forecast. "med" is the median discharge in cubic feet per second
+     for each month, computed from USGS published day-of-year medians
+     over each site's full period of record. Sites that only report
+     stage (gauge height) have no med table; those show level and
+     trend but no comparison to normal.
+     ================================================================== */
+  var GAUGES = {
+    "0344878100": { name: "Hominy Creek nr West Asheville", por: "2020–2025",
+      med: {1:142,2:162,3:175,4:144.5,5:129,6:100.5,7:92,8:89,9:66.5,10:71,11:79.5,12:99} },
+    "03446000":   { name: "Mills River nr Mills River",     por: "1925–2026",
+      med: {1:166,2:177,3:194,4:193,5:160,6:125.5,7:100,8:90,9:80,10:85,11:100.5,12:134} },
+    "03441000":   { name: "Davidson River nr Brevard",      por: "1921–2026",
+      med: {1:127,2:136,3:143,4:141.5,5:115,6:92,7:73,8:69,9:60,10:59,11:77,12:104} },
+    "0344632850": { name: "Mud Creek nr Balfour",           por: "2020–2026",
+      med: {1:110,2:113,3:116,4:104,5:90,6:68,7:62,8:65,9:46,10:56,11:68,12:84} },
+    "02140510":   { name: "Wilson Creek at Adako",          por: "", med: null },
+    "03180900":   { name: "Greenbrier River at Clover Lick", por: "", med: null }
+  };
+
+  /* Settings come from the SETTINGS block at the top of this file. */
+  var CFG = window.ALTAR_SETTINGS || {};
+  var REQUEST_EMAIL = CFG.requestEmail || "REPLACE-ME@altar.bike";
+
+  /* ------------------------------------------------------------------
+     Rider calibration. Riders rate the SCORE, not the trail, so every
+     response is a labelled data point against a known model state.
+     endpoint    : Google Apps Script /exec URL. Blank = widget hidden.
+     revealParam : widget only appears if this is in the URL query
+                   (e.g. altar.bike/pages/trail-conditions?crew=1).
+                   Set to "" to show it to everyone.
+     ------------------------------------------------------------------ */
+  var FEEDBACK = {
+    endpoint: CFG.feedbackEndpoint || "",
+    revealParam: CFG.crewParam === undefined ? "crew" : CFG.crewParam
+  };
+
+  var QUEUE_KEY = "altar:dirt:queue";
+  var REPORTER_KEY = "altar:dirt:reporter";
+
+  var CACHE_MINUTES = 30;          /* how long before a visitor triggers a fresh pull */
+  var CACHE_KEY = "altar:dirt:v3";   /* bumped: 5-day outlook needs a fresh pull */
+
+  /* ==================================================================
+     2. Condition ramp. The olive greens and the bone tone are
+        extensions to the Altar palette — flagged for Sarah's sign-off.
+        Rust, Pisgah Shadow and Ash White are straight from the guide.
+     ================================================================== */
+  var STATES = {
+    frozen: { label: "Frozen firm",  color: "#6E93A6", blurb: "Firm and fast while it lasts. Watch for the thaw." },
+    hero:   { label: "Hero dirt",    color: "#7A8A3E", blurb: "Tacky, grippy, no dust. Go now." },
+    good:   { label: "Good",         color: "#6B7A38", blurb: "Solid traction. Trail can take the traffic." },
+    soft:   { label: "Soft",         color: "#B85C2A", blurb: "Rideable. Expect rut and braking bump." },
+    wet:    { label: "Wet",          color: "#2C4A5A", blurb: "Trail will take damage. Stay off the brakes." },
+    slop:   { label: "Slop",         color: "#7E2E18", blurb: "Riding this tears it up. Pick somewhere else." },
+    dusty:  { label: "Blown out",    color: "#A9998A", blurb: "Loose over hard. Corners will let go." }
+  };
+
+  /* Listed worst-to-best at holding water, so the ranking is readable at a
+     glance: clay punishes rain hardest and recovers slowest, rock is the most
+     forgiving. clayrock and blend are the in-between grades Matt asked for
+     (5 Aug 2026) — most of the Pisgah-area dirt is clay carrying rock, not
+     rock, and labelling it "rocky" was halving every rain penalty. Their
+     constants are the component values weighted by how much of each is
+     underfoot: clayrock is roughly two parts clay to one part rock, blend is
+     equal thirds brown dirt, clay and rock. */
+  var SOILS = {
+    clay:     { wet: 1.30, dry: 0.75, name: "clay" },
+    clayrock: { wet: 1.05, dry: 0.98, name: "clay + rock" },
+    loam:     { wet: 1.00, dry: 1.00, name: "loam" },
+    blend:    { wet: 0.95, dry: 1.05, name: "dirt + clay + rock" },
+    sandy:    { wet: 0.70, dry: 1.30, name: "sand" },
+    rocky:    { wet: 0.55, dry: 1.40, name: "rock" }
+  };
+  var EXPOSURES = {
+    shaded:  { dry: 0.70, name: "shaded" },
+    mixed:   { dry: 1.00, name: "mixed"  },
+    exposed: { dry: 1.35, name: "open"   }
+  };
+
+  /* ============================== helpers ============================== */
+
+  var r0 = function (n) { return Math.round(n); };
+  var clamp = function (n, a, b) { return Math.max(a, Math.min(b, n)); };
+
+  function hourLabel(h) {
+    var ap = h < 12 ? "a" : "p";
+    var hh = h % 12 === 0 ? 12 : h % 12;
+    return hh + ap;
+  }
+  function fmtRange(a, b) { return hourLabel(a) + "\u2013" + hourLabel(Math.min(23, b + 1)); }
+
+  /* "later today, 4p" \u00b7 "tomorrow 9a" \u00b7 "Thursday 2p" */
+  function whenLabel(iso, todayDate) {
+    var datePart = iso.slice(0, 10);
+    var hr = parseInt(iso.slice(11, 13), 10);
+    var days = Math.round((Date.parse(datePart + "T00:00:00Z") -
+                           Date.parse(todayDate + "T00:00:00Z")) / 86400000);
+    if (days <= 0) return "later today, " + hourLabel(hr);
+    if (days === 1) return "tomorrow " + hourLabel(hr);
+    var d = new Date(datePart + "T12:00:00");
+    return d.toLocaleDateString(undefined, { weekday: "long" }) + " " + hourLabel(hr);
+  }
+
+  function sumPrecip(arr, end, hours) {
+    var s = 0;
+    for (var i = Math.max(0, end - hours + 1); i <= end; i++) s += arr[i] || 0;
+    return s;
+  }
+  function hoursSinceRain(arr, idx) {
+    for (var i = idx; i >= 0; i--) if ((arr[i] || 0) >= 0.01) return idx - i;
+    return Math.min(idx, 120);
+  }
+
+  /* The most recent spell of real rain: how much, over how many hours,
+     and how long ago it stopped. A three-day total tells a rider almost
+     nothing — Matt read "0.98 in over 71h" as today's rain when it had
+     fallen in four hours the previous evening, which is exactly the
+     wrong conclusion to invite on the one line people actually read.
+     Gaps of up to GAP dry hours stay inside one spell, so a storm that
+     pauses for an hour isn't reported as two. */
+  function lastSoaking(arr, idx) {
+    var GAP = 3, end = -1, i;
+    for (i = idx; i >= 0; i--) if ((arr[i] || 0) >= 0.01) { end = i; break; }
+    if (end < 0) return null;
+    var start = end, gap = 0;
+    for (i = end - 1; i >= 0; i--) {
+      if ((arr[i] || 0) >= 0.01) { start = i; gap = 0; }
+      else if (++gap > GAP) break;
+    }
+    var total = 0;
+    for (i = start; i <= end; i++) total += arr[i] || 0;
+    return { inches: total, hours: end - start + 1, agoHours: idx - end, endIdx: end };
+  }
+  function soilMoisture(h, i) {
+    var a = h.soil_moisture_0_to_1cm ? h.soil_moisture_0_to_1cm[i] : null;
+    var b = h.soil_moisture_3_to_9cm ? h.soil_moisture_3_to_9cm[i] : null;
+    if (a == null && b == null) return null;
+    if (a == null) return b;
+    if (b == null) return a;
+    return a * 0.35 + b * 0.65;
+  }
+  function dryingRate(h, i, mult) {
+    var rad  = (h.shortwave_radiation   && h.shortwave_radiation[i])   || 0;
+    var wind = (h.wind_speed_10m        && h.wind_speed_10m[i])        || 0;
+    var t    = (h.temperature_2m        && h.temperature_2m[i])        || 50;
+    var rh   = (h.relative_humidity_2m  && h.relative_humidity_2m[i]);
+    if (rh == null) rh = 70;
+    var r = 0.2;
+    r += Math.min(0.9, rad / 700);
+    r += Math.min(0.4, wind / 40);
+    r += clamp((t - 45) / 60, -0.3, 0.5);
+    r += clamp((60 - rh) / 70, -0.4, 0.4);
+    return Math.max(0.04, r) * mult;
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  var WMO = {
+    0:"Clear",1:"Mostly clear",2:"Partly cloudy",3:"Overcast",45:"Fog",48:"Freezing fog",
+    51:"Light drizzle",53:"Drizzle",55:"Heavy drizzle",56:"Freezing drizzle",57:"Freezing drizzle",
+    61:"Light rain",63:"Rain",65:"Heavy rain",66:"Freezing rain",67:"Freezing rain",
+    71:"Light snow",73:"Snow",75:"Heavy snow",77:"Snow grains",
+    80:"Showers",81:"Showers",82:"Heavy showers",85:"Snow showers",86:"Snow showers",
+    95:"Thunderstorms",96:"Storms, hail",99:"Storms, hail"
+  };
+
+  /* =========================== the dirt model =========================
+     Soil moisture at 0-1cm and 3-9cm is the backbone. Rainfall,
+     drying energy, and freeze/thaw adjust around it. Soil type and
+     aspect scale how hard wet hurts and how fast it recovers.
+     =================================================================== */
+
+  function buildModel(t, data) {
+    var h = data.hourly, times = h.time;
+    var soilMult = SOILS[t.soil].wet;
+    var dryMult  = SOILS[t.soil].dry * EXPOSURES[t.exposure].dry;
+
+    var nowKey = data.current.time.slice(0, 13), nowIdx = -1;
+    for (var i = 0; i < times.length; i++) if (times[i].slice(0, 13) === nowKey) { nowIdx = i; break; }
+    if (nowIdx < 0) nowIdx = Math.max(0, times.length - 49);
+
+    /* ---------------- rain: measured where we can get it ----------------
+       A gauge inside the forest beats a forecast for the same hour, and
+       rain is where forecast error hurts most — whether it fell here at
+       all is the whole question. So for past hours a nearby RAWS gauge
+       wins; forecast fills every hour it didn't measure, and all future
+       hours, because you cannot measure the future. If the station drops
+       out the page silently reverts to forecast. */
+    var gauge = nearestWx(t, WX_MAX_MI), gaugeTier = 1;
+    /* Nothing inside the trusted radius: take the best thing under six
+       miles rather than the forecast, and remember that it is second
+       tier so the card can say so. */
+    if (!gauge) {
+      gauge = nearestWx(t, WX_TIER2_MI);
+      if (gauge) gaugeTier = 2;
+    }
+    var precip = [], gHours = 0, gSum = 0, fSum = 0;
+    for (i = 0; i < times.length; i++) {
+      var fcast = h.precipitation[i] || 0, use = fcast;
+      if (gauge) {
+        var rec = gauge.s.hours[times[i].slice(0, 13)];
+        if (rec && rec.p != null) {
+          use = rec.p;
+          if (i <= nowIdx) { gHours++; gSum += rec.p; fSum += fcast; }
+        }
+      }
+      precip.push(use);
+    }
+    /* measured evapotranspiration over the last day — shown, not yet
+       used to drive the decay. See the note in CLAUDE.md. */
+    var et24 = null;
+    if (gauge) {
+      var e = 0, seen = 0;
+      for (i = Math.max(0, nowIdx - 23); i <= nowIdx; i++) {
+        var er = gauge.s.hours[times[i].slice(0, 13)];
+        if (er && er.et != null) { e += er.et; seen++; }
+      }
+      if (seen >= 6) et24 = e;
+    }
+    var rainSource = gauge ? {
+      name: gauge.s.name, mi: gauge.mi, hours: gHours,
+      measured: gSum, forecast: fSum, et24: et24, tier: gaugeTier
+    } : null;
+    /* Reported on every card, gauge or forecast, because "when did it
+       rain" is a question the three-day total cannot answer. */
+    var soaking = lastSoaking(precip, nowIdx);
+
+    /* No gauge close enough to trust? Look further out purely to warn.
+       Compares the last 24h measured there against the forecast here,
+       and only speaks up when they disagree enough to matter. */
+    var rainWatch = null;
+    if (!gauge) {
+      var w = nearestWx(t, WX_WATCH_MI);
+      if (w) {
+        var wm = 0, wf = 0, wn = 0;
+        for (i = Math.max(0, nowIdx - 23); i <= nowIdx; i++) {
+          var wr = w.s.hours[times[i].slice(0, 13)];
+          if (wr && wr.p != null) { wm += wr.p; wf += h.precipitation[i] || 0; wn++; }
+        }
+        if (wn >= 6 && wm - wf >= 0.2) {
+          rainWatch = { name: w.s.name, mi: w.mi, measured: wm, forecast: wf, hours: wn };
+        }
+      }
+    }
+
+    var rates = [];
+    for (i = 0; i < times.length; i++) rates.push(dryingRate(h, i, dryMult));
+    var speedWord = dryMult >= 1.25 ? "fast" : dryMult <= 0.75 ? "slow" : "steady";
+
+    /* ---------------- water balance ----------------
+       How much rain is still sitting in the top of the trail. Rain adds
+       to it, drying energy takes it away, hour by hour, and what's left
+       is what makes a trail soft.
+
+       This replaces "hours since it last rained", which reset to zero on
+       any trace — two hundredths of an inch used to wipe out a full day
+       of accumulated drying and cost the score forty points in an hour.
+       A store carries its history instead, so a sprinkle costs a
+       sprinkle's worth and nothing more.
+
+       Decay is exponential against the same drying rate the aspect
+       already uses, so soil and exposure multipliers drive both how
+       hard wet hurts and how fast it recovers. DECAY is set so a wet
+       day sheds roughly two thirds of its water in the next 24 hours of
+       average drying — a guess, like the rest of the multipliers, and
+       the first thing to check against ECONet and rider ratings. */
+    var DECAY = 0.06;
+    var water = [], wStore = 0;
+    for (i = 0; i < times.length; i++) {
+      wStore = (wStore + (precip[i] || 0)) * Math.exp(-DECAY * rates[i]);
+      if (wStore < 0.0005) wStore = 0;
+      water.push(wStore);
+    }
+    var hasSoil = false;
+    if (h.soil_moisture_3_to_9cm) {
+      for (i = 0; i < h.soil_moisture_3_to_9cm.length; i++) {
+        if (h.soil_moisture_3_to_9cm[i] != null) { hasSoil = true; break; }
+      }
+    }
+
+    function evaluate(i) {
+      var drivers = [], score = 100, dusty = false, frozen = false, p;
+      var sm = soilMoisture(h, i);
+
+      if (sm != null) {
+        if (sm > 0.27) {
+          p = Math.min(58, (sm - 0.27) * 430 * soilMult);
+          score -= p;
+          drivers.push({ w: "\u2212" + r0(p), t: "subsoil holding " + r0(sm * 100) + "% water by volume" });
+        } else if (sm < 0.11) {
+          p = Math.min(22, (0.11 - sm) * 260);
+          score -= p; dusty = true;
+          drivers.push({ w: "\u2212" + r0(p), t: "subsoil at " + r0(sm * 100) + "% \u2014 dried past tacky" });
+        } else {
+          drivers.push({ w: "ok", t: "subsoil at " + r0(sm * 100) + "% \u2014 inside the tacky band" });
+        }
+      }
+
+      var wt = water[i];
+      var hsr = hoursSinceRain(precip, i);
+      if (wt > 0.004) {
+        p = Math.min(58, wt * 46 * soilMult);
+        if (p > 1) {
+          score -= p;
+          drivers.push({ w: "\u2212" + r0(p),
+            t: wt.toFixed(2) + '" of rain still in the surface, ' + speedWord + " to shed on this aspect" });
+        }
+      } else if (hsr > 6) {
+        drivers.push({ w: "ok", t: "nothing left from the last rain \u2014 " + speedWord + " drying on this aspect" });
+      }
+
+      var pNow = precip[i] || 0;
+      if (pNow >= 0.02) { score -= 24; drivers.push({ w: "\u221224", t: "rain falling right now" }); }
+      else if (pNow > 0) { score -= 9; drivers.push({ w: "\u22129", t: "trace precipitation" }); }
+
+      var st = h.soil_temperature_6cm ? h.soil_temperature_6cm[i] : null;
+      if (st != null) {
+        if (st <= 30 && (sm == null || sm > 0.14)) {
+          frozen = true; score = Math.max(score, 86);
+          drivers.push({ w: "+", t: "soil frozen at 6cm (" + r0(st) + "\u00B0F) \u2014 firm underneath" });
+        } else {
+          var wasFrozen = false;
+          for (var k = Math.max(0, i - 18); k < i; k++) {
+            var v = h.soil_temperature_6cm[k];
+            if (v != null && v <= 30) wasFrozen = true;
+          }
+          if (wasFrozen && st > 33) {
+            score -= 30;
+            drivers.push({ w: "\u221230", t: "thawing after a freeze \u2014 worst window to ride" });
+          }
+        }
+      }
+
+      var gust = h.wind_gusts_10m ? h.wind_gusts_10m[i] : 0;
+      if (gust > 32) { score -= 8; drivers.push({ w: "\u22128", t: r0(gust) + " mph gusts \u2014 lift holds possible" }); }
+
+      score = clamp(score, 0, 100);
+      var key;
+      if (frozen) key = "frozen";
+      else if (dusty && score >= 58) key = "dusty";
+      else if (score >= 88) key = "hero";
+      else if (score >= 72) key = "good";
+      else if (score >= 56) key = "soft";
+      else if (score >= 36) key = "wet";
+      else key = "slop";
+
+      return {
+        score: score, key: key, drivers: drivers, precip: pNow,
+        temp: h.temperature_2m ? h.temperature_2m[i] : null,
+        pop: h.precipitation_probability ? h.precipitation_probability[i] : null,
+        code: h.weather_code ? h.weather_code[i] : null
+      };
+    }
+
+    var todayDate = data.current.time.slice(0, 10);
+    var dayIdx = data.daily.time.indexOf(todayDate);
+    var sunrise = parseInt((data.daily.sunrise[dayIdx] || "T07").slice(11, 13), 10) || 7;
+    var sunset  = parseInt((data.daily.sunset[dayIdx]  || "T20").slice(11, 13), 10) || 20;
+
+    var dayStart = -1;
+    for (i = 0; i < times.length; i++) if (times[i].indexOf(todayDate) === 0) { dayStart = i; break; }
+
+    var today = [];
+    for (var k2 = 0; k2 < 24; k2++) {
+      var idx = dayStart + k2;
+      if (idx < 0 || idx >= times.length) continue;
+      var ev = evaluate(idx);
+      ev.hour = k2; ev.idx = idx;
+      ev.past = idx < nowIdx;
+      ev.daylight = k2 >= sunrise && k2 <= sunset;
+      today.push(ev);
+    }
+
+    var pool = today.filter(function (x) { return x.idx >= nowIdx && x.daylight; });
+    var best = null, lens = [4, 3, 2];
+    for (var li = 0; li < lens.length; li++) {
+      var len = lens[li];
+      for (var s = 0; s + len <= pool.length; s++) {
+        var slice = pool.slice(s, s + len), contiguous = true;
+        for (var c = 1; c < slice.length; c++) if (slice[c].hour !== slice[c - 1].hour + 1) contiguous = false;
+        if (!contiguous) continue;
+        var mean = slice.reduce(function (a, b) { return a + b.score; }, 0) / len;
+        if (!best || mean > best.mean + 1.5) best = { mean: mean, from: slice[0].hour, to: slice[len - 1].hour };
+      }
+      if (best) break;
+    }
+    if (best && best.mean < 42) best = null;
+
+    /* When does it come back? Only worth answering when the model has
+       it out of the good band now. Three hours in a row, so one
+       flattering hour in the middle of a wet spell doesn't count as
+       dried out. This is the water balance's real payoff: the store
+       only falls between rain, so the crossing is a time, not a
+       number that flickers back and forth across the threshold. */
+    var nowEval = evaluate(nowIdx);
+    var GOOD = 72, HOLD = 3, recovery = null;
+    if (nowEval.score < GOOD) {
+      for (i = nowIdx + 1; i < times.length; i++) {
+        /* Report a time someone can actually ride. The model often
+           crosses back overnight; "dries out 2am" is true and useless,
+           so only daylight hours can start the window. */
+        var rh = parseInt(times[i].slice(11, 13), 10);
+        if (rh < sunrise || rh > sunset) continue;
+        var holds = true;
+        for (var q = 0; q < HOLD; q++) {
+          if (i + q >= times.length || evaluate(i + q).score < GOOD) { holds = false; break; }
+        }
+        if (holds) { recovery = times[i]; break; }
+      }
+    }
+
+    var outlook = [];
+    [1, 2, 3, 4, 5].forEach(function (off) {
+      var date = data.daily.time[dayIdx + off];
+      if (!date) return;
+      var st2 = -1;
+      for (var j = 0; j < times.length; j++) if (times[j].indexOf(date) === 0) { st2 = j; break; }
+      if (st2 < 0) return;
+      var hrs = [];
+      for (var q = sunrise; q <= sunset; q++) if (st2 + q < times.length) hrs.push(evaluate(st2 + q));
+      if (!hrs.length) return;
+      var m = hrs.reduce(function (a, b) { return a + b.score; }, 0) / hrs.length;
+      var peak = hrs.reduce(function (a, b) { return b.score > a.score ? b : a; });
+      outlook.push({
+        date: date, mean: m, key: peak.key,
+        precip: data.daily.precipitation_sum ? data.daily.precipitation_sum[dayIdx + off] : 0,
+        hi: data.daily.temperature_2m_max ? data.daily.temperature_2m_max[dayIdx + off] : null
+      });
+    });
+
+    return {
+      now: nowEval, today: today, best: best, outlook: outlook,
+      recovery: recovery, waterNow: water[nowIdx], rainSource: rainSource, rainWatch: rainWatch,
+      soaking: soaking,
+      hasSoil: hasSoil, nowIdx: nowIdx,
+      p24: sumPrecip(precip, nowIdx, 24),
+      p72: sumPrecip(precip, nowIdx, 72),
+      hsr: hoursSinceRain(precip, nowIdx),
+      elevation: data.elevation, current: data.current,
+      /* raw inputs, kept so a rider's rating can be matched to the exact
+         model state that produced the score they were looking at */
+      smNow: soilMoisture(h, nowIdx),
+      soilTempNow: h.soil_temperature_6cm ? h.soil_temperature_6cm[nowIdx] : null,
+      wetMult: soilMult, dryMult: dryMult,
+      localTime: data.current.time,
+      /* The model state at the hour a rider ACTUALLY rode, not the hour
+         they happened to open the page. A rating logged at 8pm about a
+         9am ride was previously stored against the 8pm snapshot, which
+         made it worse than useless for calibration — it labelled the
+         wrong conditions. The hourly arrays are right here; use them. */
+      stateAt: function (hoursBack) {
+        var i = nowIdx - Math.max(0, Math.round(hoursBack || 0));
+        if (i < 0) i = 0;
+        var e = evaluate(i);
+        return {
+          idx: i, time: times[i], score: e.score, key: e.key,
+          water: water[i], sm: soilMoisture(h, i),
+          soilTemp: h.soil_temperature_6cm ? h.soil_temperature_6cm[i] : null,
+          airTemp: h.temperature_2m ? h.temperature_2m[i] : null,
+          p24: sumPrecip(precip, i, 24), p72: sumPrecip(precip, i, 72),
+          hsr: hoursSinceRain(precip, i)
+        };
+      }
+    };
+  }
+
+  /* ============================== fetching ============================== */
+
+  var HOURLY = [
+    "temperature_2m","relative_humidity_2m","precipitation","precipitation_probability",
+    "weather_code","wind_speed_10m","wind_gusts_10m","shortwave_radiation",
+    "soil_moisture_0_to_1cm","soil_moisture_3_to_9cm","soil_temperature_6cm"
+  ].join(",");
+
+  /* Open-Meteo takes several coordinates in one request and answers
+     with an array in the same order. One trail per call was the bulk
+     of this page's traffic — and the commercial-use question scales
+     with calls, not trails, so batching is also the honest answer to
+     it. Single-trail retries pass a one-element list and get a bare
+     object back; loadBatch handles both shapes. */
+  function url(list) {
+    return "https://api.open-meteo.com/v1/forecast" +
+      "?latitude=" + list.map(function (t) { return t.lat; }).join(",") +
+      "&longitude=" + list.map(function (t) { return t.lon; }).join(",") +
+      "&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_gusts_10m" +
+      "&hourly=" + HOURLY +
+      "&daily=sunrise,sunset,precipitation_sum,temperature_2m_max" +
+      "&past_days=3&forecast_days=6" +
+      "&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto";
+  }
+
+  /* Cache is keyed by trail identity, not array position, so adding, removing
+     or reordering trails can never show one trail's data under another's name. */
+  function keyOf(t) { return t.name + "|" + t.lat + "," + t.lon; }
+
+  function readCache() {
+    try {
+      var raw = window.localStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      var c = JSON.parse(raw);
+      if (!c.at || Date.now() - c.at > CACHE_MINUTES * 60000) return null;
+      return c;
+    } catch (e) { return null; }
+  }
+  function writeCache(at, raw) {
+    try { window.localStorage.setItem(CACHE_KEY, JSON.stringify({ at: at, raw: raw })); } catch (e) {}
+  }
+
+  /* ================== measured data, layered on top ==================
+     Three sources that are observed rather than modelled. Every one of
+     them is optional: if a request fails the page carries on with the
+     Open-Meteo score exactly as before. None of them change the score —
+     they sit alongside it so a rider can see where the model and the
+     real world disagree. Folding creek level or station soil moisture
+     into the score is a calibration decision, and that needs Matt's
+     ground truth plus enough rider ratings to justify it.
+     =================================================================== */
+
+  var EXTRA = { alerts: {}, creeks: {}, stations: null };
+
+  /* --- NWS watches, warnings and advisories. One call, all trails. --- */
+  function loadAlerts() {
+    var zones = [];
+    TRAILS.forEach(function (t) {
+      if (t.zone && zones.indexOf(t.zone) === -1) zones.push(t.zone);
+      if (t.czone && zones.indexOf(t.czone) === -1) zones.push(t.czone);
+    });
+    if (!zones.length) return Promise.resolve();
+    return fetch("https://api.weather.gov/alerts/active?zone=" + zones.join(","))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.features) return;
+        var by = {};
+        j.features.forEach(function (f) {
+          var p = f.properties || {};
+          if (!p.event || /test message/i.test(p.event)) return;
+          var ugc = (p.geocode && p.geocode.UGC) || [];
+          ugc.forEach(function (z) {
+            (by[z] = by[z] || []).push({
+              event: p.event, severity: p.severity,
+              ends: p.ends || p.expires || null
+            });
+          });
+        });
+        EXTRA.alerts = by;
+      })
+      .catch(function () {});
+  }
+
+  /* --- USGS creek levels. One call: a day of actual readings, so the
+         trend comes from the last twelve hours rather than daily means.
+         Daily means average a storm spike away — on 3 Aug 2026 Hominy
+         Creek went 39 to 77 cfs in three hours and still read "steady",
+         which is exactly wrong on the back of a peak. --- */
+  function loadCreeks() {
+    var ids = [];
+    TRAILS.forEach(function (t) { if (t.gauge && ids.indexOf(t.gauge) === -1) ids.push(t.gauge); });
+    if (!ids.length) return Promise.resolve();
+    var got = {};
+
+    return fetch("https://waterservices.usgs.gov/nwis/iv/?format=json&sites=" + ids.join(",") +
+                 "&parameterCd=00060,00065&period=P1D&siteStatus=active")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        ((j && j.value && j.value.timeSeries) || []).forEach(function (ts) {
+          var id = ts.sourceInfo.siteCode[0].value;
+          var code = ts.variable.variableCode[0].value;
+          var pts = ((ts.values[0] && ts.values[0].value) || [])
+            .map(function (v) { return { t: Date.parse(v.dateTime), n: +v.value }; })
+            .filter(function (p) { return !isNaN(p.t) && !isNaN(p.n) && p.n > -999; });
+          if (!pts.length) return;
+
+          var g = got[id] = got[id] || { id: id };
+          var last = pts[pts.length - 1];
+          if (code === "00060") g.cfs = last.n;
+          if (code === "00065") g.ft = last.n;
+          g.at = new Date(last.t).toISOString();
+
+          /* change against the reading closest to twelve hours back */
+          var target = last.t - 12 * 3600000, ref = null;
+          for (var k = 0; k < pts.length; k++) {
+            if (pts[k].t <= target) ref = pts[k]; else break;
+          }
+          if (!ref) ref = pts[0];
+          if (ref.n) g["ch_" + code] = (last.n - ref.n) / ref.n;
+        });
+      })
+      .catch(function () {})
+      .then(function () {
+        /* discharge is the better signal; stage stands in when it's all
+           a site reports */
+        Object.keys(got).forEach(function (id) {
+          var g = got[id];
+          var ch = g.ch_00060 != null ? g.ch_00060 : g.ch_00065;
+          if (ch == null) return;
+          g.change12 = ch;
+          g.trend = ch > 0.12 ? "rising" : ch < -0.12 ? "falling" : "steady";
+        });
+        EXTRA.creeks = got;
+      });
+  }
+
+  /* Soil probes we do not believe, by station id. The RAIN gauge at these
+     sites is kept — only the moisture sensor is dropped.
+
+     FLET (Mtn Horticultural Crops Research Stn) read 44% volumetric water
+     at both 10cm and 20cm on 5 Aug 2026 having caught 0.26" of rain in
+     72 hours, while 0246CA — which caught 0.93", nearly four times as
+     much — read 24%. Every forest and fire station in range sat at
+     24–29%; the only sites reading 40–49% were FLET, WAYN (also a
+     research station) and UNCA. It is a working horticultural research
+     farm: those are irrigated plots, not trail dirt. 44% is near
+     saturation, which August evapotranspiration around 0.5"/day makes
+     impossible on a quarter inch of rain.
+
+     WAYN and UNCA are suspected on the same pattern but are not close
+     enough to any trail to have mattered yet, so they are named here
+     rather than blocked — check them before pinning either. */
+  var SOIL_PROBE_BLOCK = { FLET: "irrigated research plots — rain gauge fine, probe is not" };
+
+  /* Surface the payload's own diagnostics. Plain language, muted, and
+     only when something is actually wrong — but never nothing. */
+  function showDegraded(j) {
+    var el = document.getElementById("da-degraded");
+    if (!el) return;
+    var notes = [];
+    (j.dropped || []).forEach(function (d) { notes.push(String(d)); });
+    if ((j.stale || []).length) {
+      notes.push(j.stale.length + " station" + (j.stale.length > 1 ? "s" : "") +
+                 " reporting stale readings: " + j.stale.join(", "));
+    }
+    if (!notes.length) { el.style.display = "none"; el.textContent = ""; return; }
+    el.textContent = "Degraded data sources right now — " + notes.join("; ") +
+      ". Scores still run on forecast and whatever measured data did arrive.";
+    el.style.display = "";
+  }
+
+  /* --- Measured soil moisture from NC State ECONet stations, through
+         our own proxy so the CLOUDS key never reaches the browser. --- */
+  function loadStations() {
+    var ep = CFG.soilStationEndpoint || "";
+    if (!ep) return Promise.resolve();
+    return fetch(ep)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j) return;
+        if (j.stations && j.stations.length) {
+          EXTRA.stations = j.stations.filter(function (s) {
+            return !SOIL_PROBE_BLOCK[s.id];
+          });
+        }
+        if (j.wx && j.wx.length) EXTRA.wx = j.wx;
+        if (j.coco && j.coco.length) EXTRA.coco = j.coco;
+        showDegraded(j);
+      })
+      .catch(function () {});
+  }
+
+  /* How close a rain gauge has to be before the model prefers it to the
+     forecast. A gauge is a point and a forecast is an area average, so
+     past about three miles the gauge stops speaking for the trail. */
+  var WX_MAX_MI = 3.5;
+
+  /* Second tier. Between these two distances a gauge is not trusted to
+     replace the forecast — in scattered summer convection it can rain
+     hard six miles away and not at all on the trail — but it is still
+     evidence, and a rider deserves to hear about it. So it warns and
+     leaves the score alone. This tier exists because Bent Creek showed
+     hero dirt through 0.92 in of rain with nothing inside 3.5 mi to say
+     otherwise; falling all the way back to forecast is worse than
+     hearing that it poured a few miles away. */
+  var WX_WATCH_MI = 10;
+
+  /* Between WX_MAX_MI and here, a gauge scores the trail when nothing
+     closer exists at all. Added 5 Aug 2026 with evidence behind it: the
+     first forecast grade found Open-Meteo catching 9% of the rain that
+     fell at DuPont and 22% at Pisgah Lower, so falling back to forecast
+     is not the safe default it looks like — it is the failure mode that
+     showed hero dirt at Bent Creek through 0.92 in of rain.
+
+     Six miles, not ten, and only as a fallback. At 6.0 this changes
+     exactly one card: North Mills River, whose nearest gauge is 5.5 mi
+     (FLET) with a second at 5.6 mi (Asheville 13 S) agreeing to the
+     hundredth — 0.26 in over 72h from both. Ride Kanuga's nearest is
+     6.1 mi and still scores from forecast; nothing else moves. A tier-2
+     gauge is labelled as such on the card, because a rider deserves to
+     know the number came from six miles away. */
+  var WX_TIER2_MI = 6;
+
+  function nearestWx(t, maxMi) {
+    if (!EXTRA.wx) return null;
+    var best = null;
+    EXTRA.wx.forEach(function (s) {
+      if (s.lat == null || s.lon == null || !s.hours) return;
+      var mi = milesBetween(t.lat, t.lon, s.lat, s.lon);
+      if (mi > maxMi) return;
+      if (!best || mi < best.mi) best = { s: s, mi: mi };
+    });
+    return best;
+  }
+
+  /* Plain English for a soaking: how much, how fast, how long ago.
+     "0.92" in 4h, ending about 22h ago" beats a 71-hour total because a
+     rider can act on it. Intensity is in there deliberately — an inch
+     in four hours and an inch across three days leave very different
+     trails, and the score's water store can't tell them apart. */
+  function soakPhrase(s) {
+    var when;
+    if (s.agoHours <= 1) when = "still falling";
+    else if (s.agoHours < 24) when = "ended " + s.agoHours + "h ago";
+    else if (s.agoHours < 48) when = "ended yesterday";
+    else when = "ended " + Math.round(s.agoHours / 24) + " days ago";
+    return s.inches.toFixed(2) + '" in ' + s.hours + "h, " + when;
+  }
+
+  /* CoCoRaHS volunteer daily gauges — display-only, never scored.
+     Freshest report wins, THEN nearest. These are volunteers and they
+     lapse: Kanuga's closest observer at 0.4 mi is flagged active but
+     last reported in June. Selecting on distance alone would put
+     five-week-old rain on a card as though it were current. */
+  var COCO_MAX_MI = 8;
+  function nearestCoco(t) {
+    if (!EXTRA.coco) return null;
+    var cutoff = new Date(Date.now() - 2 * 86400e3).toISOString().slice(0, 10);
+    var best = null;
+    EXTRA.coco.forEach(function (s) {
+      if (s.lat == null || s.lon == null || !s.date || s.date < cutoff) return;
+      var mi = milesBetween(t.lat, t.lon, s.lat, s.lon);
+      if (mi > COCO_MAX_MI) return;
+      if (!best || s.date > best.s.date ||
+          (s.date === best.s.date && mi < best.mi)) best = { s: s, mi: mi };
+    });
+    return best;
+  }
+
+  function milesBetween(a, b, c, d) {
+    var R = 3959, rad = function (x) { return x * Math.PI / 180; };
+    var dLa = rad(c - a), dLo = rad(d - b);
+    var h = Math.sin(dLa / 2) * Math.sin(dLa / 2) +
+            Math.cos(rad(a)) * Math.cos(rad(c)) * Math.sin(dLo / 2) * Math.sin(dLo / 2);
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  /* How much closer a station has to be before distance settles it.
+     Inside this margin two stations count as equally near. */
+  var STATION_TIE_MI = 2;
+
+  /* Closest station that actually reported soil moisture. Where two are
+     effectively the same distance away — DuPont sits 16.1 miles from
+     both a valley station and a 5,320ft summit — the lower one wins,
+     rather than whichever happened to come back first.
+     Set `station` on a trail to pin one and skip the choosing. */
+  function nearestStation(t) {
+    if (!EXTRA.stations) return null;
+    var pool = [];
+    EXTRA.stations.forEach(function (s) {
+      if (s.lat == null || s.lon == null) return;
+      if (s.soilmoist == null && s.soilmoist20cm == null) return;
+      if (t.station) { if (s.id !== t.station) return; }
+      var mi = milesBetween(t.lat, t.lon, s.lat, s.lon);
+      if (!t.station && mi > 45) return;
+      pool.push({ s: s, mi: mi });
+    });
+    if (!pool.length) return null;
+
+    var nearest = Infinity;
+    pool.forEach(function (p) { if (p.mi < nearest) nearest = p.mi; });
+
+    var best = null;
+    pool.forEach(function (p) {
+      if (p.mi > nearest + STATION_TIE_MI) return;
+      if (!best) { best = p; return; }
+      var a = p.s.elev == null ? Infinity : p.s.elev;
+      var b = best.s.elev == null ? Infinity : best.s.elev;
+      if (a < b || (a === b && p.mi < best.mi)) best = p;
+    });
+    return best;
+  }
+
+  /* =============================== render =============================== */
+
+  var grid = document.getElementById("da-grid");
+  var verdictEl = document.getElementById("da-verdict");
+  var refreshBtn = document.getElementById("da-refresh");
+  var stampEl = document.getElementById("da-stamp");
+  var models = {};
+
+  (function legend() {
+    var order = ["hero","good","soft","wet","slop","dusty","frozen"], out = "";
+    order.forEach(function (k) {
+      out += '<span><i style="background:' + STATES[k].color + '"></i>' + esc(STATES[k].label) + "</span>";
+    });
+    document.getElementById("da-legend").innerHTML = out;
+  })();
+
+  function cardShell(t, i) {
+    var el = document.createElement("article");
+    el.className = "da-card";
+    el.setAttribute("data-i", i);
+    el.innerHTML =
+      '<h2 class="da-display">' + esc(t.name) + "</h2>" +
+      '<p class="da-place">' + esc(t.place) + " &middot; " + SOILS[t.soil].name +
+        " &middot; " + EXPOSURES[t.exposure].name + "</p>" +
+      '<div class="da-body"><p class="da-msg">Reading conditions&hellip;</p></div>';
+    return el;
+  }
+
+  var MONTHS = ["January","February","March","April","May","June",
+                "July","August","September","October","November","December"];
+
+  function alertsFor(t) {
+    var seen = {}, out = [];
+    [t.zone, t.czone].forEach(function (z) {
+      (EXTRA.alerts[z] || []).forEach(function (a) {
+        if (seen[a.event]) return;
+        seen[a.event] = 1; out.push(a);
+      });
+    });
+    return out.slice(0, 3);
+  }
+
+  function alertHtml(t) {
+    var list = alertsFor(t);
+    if (!list.length) return "";
+    return list.map(function (a) {
+      var until = "";
+      if (a.ends) {
+        var d = new Date(a.ends);
+        if (!isNaN(d)) until = " until " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      }
+      return '<div class="da-alert"><b>' + esc(a.event) + "</b>" + esc(until) + "</div>";
+    }).join("");
+  }
+
+  /* Creek state relative to what this month normally runs. */
+  function creekRead(t) {
+    var g = EXTRA.creeks[t.gauge];
+    if (!t.gauge || !g) return null;
+    var meta = GAUGES[t.gauge] || {};
+    var mo = new Date().getMonth() + 1;
+    var norm = meta.med ? meta.med[mo] : null;
+    var out = { meta: meta, cfs: g.cfs, ft: g.ft, trend: g.trend,
+                change12: g.change12, month: MONTHS[mo - 1] };
+    if (norm && g.cfs != null) {
+      out.pct = Math.round(g.cfs / norm * 100);
+      out.word = out.pct >= 150 ? "high" : out.pct >= 115 ? "up"
+               : out.pct >= 85  ? "normal" : out.pct >= 55 ? "low" : "very low";
+    } else {
+      out.word = g.trend || "—";
+    }
+    return out;
+  }
+
+  function creekFactValue(t) {
+    var c = creekRead(t);
+    if (!c) return "—";
+    if (c.pct != null) return c.word;
+    if (c.ft != null) return c.ft.toFixed(2) + "'";
+    return c.word;
+  }
+
+  /* What the creek number actually tells a rider. Flow relative to the
+     seasonal normal is a read on how full the ground is, which is the
+     part the rain totals alone can't tell you. */
+  function creekMeaning(c) {
+    var s = "";
+    if (c.pct != null) {
+      if (c.pct >= 150)      s = "Creek is well up. The ground is full, and trails will hold water longer than the rain totals suggest.";
+      else if (c.pct >= 115) s = "Running above normal. Low ground and the usual wet spots stay soft.";
+      else if (c.pct >= 85)  s = "About what it runs in " + c.month + ". No signal either way.";
+      else if (c.pct >= 55)  s = "Down on the " + c.month + " normal. The watershed is dry, so trails shed what falls on them.";
+      else                   s = "Well down on normal. Dust before mud.";
+      /* A big jump in half a day beats the seasonal comparison for
+         telling a rider what happened. It is also the only warning
+         they get when the forecast missed the rain outright. */
+      if (c.change12 != null && c.change12 >= 0.4) {
+        s += " But it is up " + r0(c.change12 * 100) + "% in twelve hours, so rain fell in this " +
+             "watershed recently whether the forecast caught it or not.";
+      } else if (c.trend === "rising") s += " Still climbing, so something upstream is running off.";
+      else if (c.trend === "falling") s += " Dropping back.";
+      return s;
+    }
+    if (c.change12 != null && c.change12 >= 0.4) {
+      return "Creek is up " + r0(c.change12 * 100) + "% in twelve hours. Rain fell in this watershed " +
+             "recently whether the forecast caught it or not.";
+    }
+    if (c.trend === "rising")  return "Creek is climbing. Something upstream is running off.";
+    if (c.trend === "falling") return "Creek is dropping back.";
+    return "";
+  }
+
+  /* What the station reading means, and — the useful part — where it
+     disagrees with the model. The score wants soil between 0.11 and
+     0.27; the station says what the dirt is actually doing. */
+  function stationMeaning(s, m) {
+    var out = [];
+    var sm = s.soilmoist20cm != null ? s.soilmoist20cm : s.soilmoist;
+    if (sm != null) {
+      if (sm > 0.27)      out.push("Station dirt is wetter than the tacky band.");
+      else if (sm < 0.11) out.push("Station dirt is under the tacky band. Loose over hard.");
+      else                out.push("Station dirt is inside the tacky band, which is the range the score calls good.");
+      if (m && m.smNow != null) {
+        var d = Math.round((sm - m.smNow) * 100);
+        if (Math.abs(d) >= 8) {
+          out.push("That is " + Math.abs(d) + " points " + (d > 0 ? "wetter" : "drier") +
+                   " than the model has this spot.");
+        }
+      }
+    }
+    if (s.soiltemp != null) {
+      if (s.soiltemp <= 32)     out.push("Soil is frozen at the sensor. Firm while it lasts, greasy on the thaw.");
+      else if (s.soiltemp < 40) out.push("Cold soil. Slow to dry.");
+      else if (s.soiltemp >= 75) out.push("Warm soil. Drying fast.");
+    }
+    return out.join(" ");
+  }
+
+  /* The measured-data lines that sit under "Why this number". */
+  function measuredHtml(t, m) {
+    var rows = "";
+    var c = creekRead(t);
+    if (c) {
+      var bits = [];
+      if (c.cfs != null) bits.push(r0(c.cfs) + " cfs");
+      if (c.ft != null) bits.push(c.ft.toFixed(2) + " ft");
+      if (c.pct != null) bits.push(c.pct + "% of the " + c.month + " normal");
+      /* the 12-hour change matters more than the seasonal comparison
+         right after rain — a creek can sit below its August median and
+         still have doubled since yesterday afternoon */
+      if (c.change12 != null && Math.abs(c.change12) >= 0.12) {
+        bits.push((c.change12 > 0 ? "up " : "down ") + r0(Math.abs(c.change12) * 100) + "% in 12h");
+      } else if (c.trend) {
+        bits.push(c.trend);
+      }
+      rows += '<li><span class="da-w" style="color:#8C7D70">creek</span><span>' +
+        esc(c.meta.name) + " · " + t.gaugeMi + " mi — " + esc(bits.join(", ")) + "</span></li>";
+    }
+    var rs = m && m.rainSource;
+    if (rs && rs.hours >= 6) {
+      /* Lead with the last real soaking, not the three-day total. The
+         total answers "how much has fallen this week"; a rider is
+         asking "is it wet right now", and only the timing answers that. */
+      var bits2 = [];
+      if (m.soaking) bits2.push(soakPhrase(m.soaking));
+      /* The window total only earns its place when earlier rain adds to
+         the picture. If one spell is all there was, saying it twice
+         just buries the timing again. */
+      if (!m.soaking || rs.measured - m.soaking.inches >= 0.05) {
+        bits2.push(rs.measured.toFixed(2) + '" total over ' + rs.hours + "h");
+      }
+      var gap = rs.measured - rs.forecast;
+      if (Math.abs(gap) >= 0.05) {
+        bits2.push("forecast said " + rs.forecast.toFixed(2) + '"');
+      }
+      if (rs.et24 != null) bits2.push(rs.et24.toFixed(2) + '" evaporated in 24h');
+      /* Say it plainly when the number came from a second-tier gauge. It
+         is still measured rain and still beats the forecast, but at this
+         range a summer cell can land on one and miss the other, and that
+         is the rider's call to make rather than ours to hide. */
+      if (rs.tier === 2) bits2.push("nothing closer reports — read it as the area, not the trail");
+      rows += '<li><span class="da-w" style="color:' + (rs.tier === 2 ? "#B85C2A" : "#8C7D70") + '">rain' +
+        (rs.tier === 2 ? "·2" : "") + '</span><span>' +
+        esc(rs.name) + " · " + rs.mi.toFixed(1) + " mi — " + esc(bits2.join(", ")) + "</span></li>";
+    } else if (m && m.soaking && m.soaking.inches >= 0.05) {
+      /* Forecast-only trails deserve the timing too. */
+      rows += '<li><span class="da-w" style="color:#8C7D70">rain</span><span>' +
+        esc(soakPhrase(m.soaking)) + " (forecast)</span></li>";
+    }
+
+    var rw = m && m.rainWatch;
+    if (rw) {
+      rows += '<li><span class="da-w" style="color:#B85C2A">rain?</span><span>' +
+        esc(rw.name) + " · " + rw.mi.toFixed(0) + " mi — " + rw.measured.toFixed(2) +
+        '" measured in 24h, forecast here said ' + rw.forecast.toFixed(2) +
+        '". Too far off to score from.</span></li>';
+    }
+
+    /* Volunteer daily gauge, only where nothing hourly scores the trail.
+       A tube read each morning: the number is the 24h to that reading,
+       not this hour — which is why it cross-checks and never scores. */
+    if (!(m && m.rainSource)) {
+      var cc = nearestCoco(t);
+      if (cc) {
+        var ccWhen = cc.s.date === new Date().toISOString().slice(0, 10) ? "this morning" : "yesterday morning";
+        rows += '<li><span class="da-w" style="color:#8C7D70">rain·d</span><span>' +
+          esc(cc.s.name || cc.s.id) + " · " + cc.mi.toFixed(1) + " mi — " +
+          (cc.s.precip < 0.01 ? (cc.s.precip > 0 ? "a trace" : '0.00"') : cc.s.precip.toFixed(2) + '"') +
+          " in the 24h to " + ccWhen + " (volunteer daily gauge)</span></li>";
+      }
+    }
+
+    var st = nearestStation(t);
+    if (st) {
+      var s = st.s, p = [];
+      var sm = s.soilmoist20cm != null ? s.soilmoist20cm : s.soilmoist;
+      var depth = s.soilmoist20cm != null ? "20cm" : "surface";
+      if (sm != null) p.push(r0(sm * 100) + "% water at " + depth);
+      if (s.soiltemp != null) p.push(r0(s.soiltemp) + "°F soil");
+      if (p.length) {
+        var where = st.mi.toFixed(0) + " mi";
+        if (s.elev != null) where += ", " + r0(s.elev).toLocaleString() + " ft";
+        rows += '<li><span class="da-w" style="color:#8C7D70">station</span><span>' +
+          esc(s.name || s.id) + " · " + esc(where) + " — " + esc(p.join(", ")) + "</span></li>";
+      }
+    }
+    if (!rows) return "";
+
+    var says = [];
+    if (rw) {
+      says.push("No gauge close enough to score from here, but " + esc(rw.name) + " " +
+        rw.mi.toFixed(0) + " miles off caught " + rw.measured.toFixed(2) +
+        '" in the last day against ' + rw.forecast.toFixed(2) +
+        '" forecast here. Scattered rain, so it may have missed this trail entirely — ' +
+        "or the score may be reading drier than the dirt.");
+    }
+    if (rs && rs.hours >= 6) {
+      var g = rs.measured - rs.forecast;
+      if (g >= 0.1) says.push("The gauge caught " + g.toFixed(2) +
+        '" more rain than the forecast had, so this score is wetter than the forecast alone would read.');
+      else if (g <= -0.1) says.push("The forecast expected " + Math.abs(g).toFixed(2) +
+        '" more rain than actually fell, so this score is drier than the forecast alone would read.');
+    }
+    if (c) { var cm = creekMeaning(c); if (cm) says.push(cm); }
+    if (st) { var sMsg = stationMeaning(st.s, m); if (sMsg) says.push(sMsg); }
+
+    return '<div class="da-measured-in"><p class="da-sub">Measured nearby</p><ul>' + rows + "</ul>" +
+      (says.length ? '<p class="da-meaning">' + esc(says.join(" ")) + "</p>" : "") +
+      '<p class="da-note">Gauge and station readings are measured, not forecast.</p></div>';
+  }
+
+  /* Patch the observed data into cards that are already on screen. */
+  function applyExtra() {
+    TRAILS.forEach(function (t, i) {
+      var el = cards[i];
+      if (!el || !models[i]) return;
+      var a = el.querySelector(".da-alertbox");
+      if (a) a.innerHTML = alertHtml(t);
+      var f = el.querySelector(".da-creekfact dd");
+      if (f) f.textContent = creekFactValue(t);
+      var mrow = el.querySelector(".da-measured");
+      if (mrow) mrow.innerHTML = measuredHtml(t, models[i]);
+    });
+  }
+
+  function renderCard(el, t, m) {
+    var body = el.querySelector(".da-body");
+    var s = STATES[m.now.key];
+
+    var strip = "";
+    m.today.forEach(function (h) {
+      var st = STATES[h.key];
+      var op = h.past ? 0.24 : h.daylight ? 1 : 0.42;
+      var ring = h.idx === m.nowIdx ? "outline:1px solid #CCCCCC;" : "";
+      var brk = (m.best && h.hour >= m.best.from && h.hour <= m.best.to)
+        ? '<span class="da-bracket"></span>' : "";
+      strip += '<div class="da-slot" data-h="' + h.hour + '">' +
+        '<span class="da-bar" style="height:' + Math.max(4, h.score) + "%;background:" + st.color +
+        ";opacity:" + op + ";" + ring + '"></span>' + brk + "</div>";
+    });
+
+    var drivers = "";
+    m.now.drivers.forEach(function (d) {
+      var col = d.w.charAt(0) === "\u2212" ? "#B85C2A" : d.w.charAt(0) === "+" ? "#7A8A3E" : "#8C7D70";
+      drivers += '<li><span class="da-w" style="color:' + col + '">' + esc(d.w) + "</span><span>" + esc(d.t) + "</span></li>";
+    });
+
+    var outlook = "";
+    if (m.outlook.length) {
+      outlook = '<div class="da-outlook">';
+      m.outlook.forEach(function (o) {
+        var d = new Date(o.date + "T12:00:00");
+        var day = d.toLocaleDateString(undefined, { weekday: "short" }).toUpperCase();
+        outlook += '<div class="da-orow"><span>' + esc(day) + "</span>" +
+          '<span class="da-obar"><i style="width:' + r0(o.mean) + "%;background:" + STATES[o.key].color + '"></i></span>' +
+          "<span>" + r0(o.mean) + "</span>" +
+          "<span>" + o.precip.toFixed(2) + '" &middot; ' + (o.hi != null ? r0(o.hi) + "\u00B0" : "\u2014") + "</span></div>";
+      });
+      outlook += "</div>";
+    }
+
+    body.innerHTML =
+      '<div class="da-alertbox">' + alertHtml(t) + "</div>" +
+      '<div class="da-readout">' +
+        '<div class="da-score" style="color:' + s.color + '">' + r0(m.now.score) + "</div>" +
+        "<div>" +
+          '<span class="da-state" style="color:' + s.color + ";border-color:" + s.color + '">' + esc(s.label) + "</span>" +
+          '<p class="da-blurb">' + esc(s.blurb) + "</p>" +
+        "</div>" +
+      "</div>" +
+      '<p class="da-window">' + (m.best
+        ? "Best window today <b>" + fmtRange(m.best.from, m.best.to) + "</b>"
+        : m.recovery
+          ? "Not today. Dries out <b>" + esc(whenLabel(m.recovery, m.current.time.slice(0, 10))) + "</b>"
+          : m.now.score < 72
+            ? "Not today, and nothing in the forecast brings it back this week."
+            : "No good window left today.") + "</p>" +
+      '<div class="da-strip">' + strip + "</div>" +
+      '<div class="da-axis"><span>12a</span><span>6a</span><span>noon</span><span>6p</span><span>11p</span></div>' +
+      '<dl class="da-facts">' +
+        "<div><dt>now</dt><dd>" + r0(m.current.temperature_2m) + "\u00B0 " + esc(WMO[m.current.weather_code] || "") + "</dd></div>" +
+        "<div><dt>24h rain</dt><dd>" + m.p24.toFixed(2) + '"</dd></div>' +
+        "<div><dt>72h rain</dt><dd>" + m.p72.toFixed(2) + '"</dd></div>' +
+        "<div><dt>dry for</dt><dd>" + (m.hsr >= 120 ? "5d+" : m.hsr + "h") + "</dd></div>" +
+        (t.gauge ? '<div class="da-creekfact"><dt>creek</dt><dd>' + esc(creekFactValue(t)) + "</dd></div>" : "") +
+      "</dl>" +
+      '<button class="da-toggle" type="button">Why this number</button>' +
+      '<div class="da-why" hidden><ul>' + drivers + "</ul>" +
+        (m.hasSoil ? "" : '<p class="da-note">No soil model available for this point \u2014 score is built from rainfall and drying only.</p>') +
+        '<div class="da-measured">' + measuredHtml(t, m) + "</div>" +
+        outlook +
+      "</div>";
+
+    var toggle = body.querySelector(".da-toggle");
+    var why = body.querySelector(".da-why");
+    toggle.addEventListener("click", function () {
+      var open = !why.hidden;
+      why.hidden = open;
+      toggle.textContent = open ? "Why this number" : "Hide the math";
+    });
+
+    var scoreEl = body.querySelector(".da-score");
+    var stateEl = body.querySelector(".da-state");
+    var blurbEl = body.querySelector(".da-blurb");
+    body.querySelectorAll(".da-slot").forEach(function (slot) {
+      slot.addEventListener("mouseenter", function () {
+        var h = m.today[parseInt(slot.getAttribute("data-h"), 10)];
+        if (!h) return;
+        var hs = STATES[h.key];
+        scoreEl.textContent = r0(h.score);
+        scoreEl.style.color = hs.color;
+        stateEl.textContent = hs.label;
+        stateEl.style.color = hs.color;
+        stateEl.style.borderColor = hs.color;
+        blurbEl.textContent = hourLabel(h.hour) + " \u2014 " + (WMO[h.code] || "\u2014") +
+          ", " + r0(h.temp) + "\u00B0" + (h.pop != null ? ", " + r0(h.pop) + "% chance" : "");
+      });
+      slot.addEventListener("mouseleave", function () {
+        scoreEl.textContent = r0(m.now.score);
+        scoreEl.style.color = s.color;
+        stateEl.textContent = s.label;
+        stateEl.style.color = s.color;
+        stateEl.style.borderColor = s.color;
+        blurbEl.textContent = s.blurb;
+      });
+    });
+
+    attachRating(body, t, m);
+  }
+
+  function renderError(el, t, i, msg) {
+    var body = el.querySelector(".da-body");
+    body.innerHTML = '<p class="da-err">' + esc(msg) + "</p>" +
+      '<button class="da-retry" type="button">Try again</button>';
+    body.querySelector(".da-retry").addEventListener("click", function () {
+      body.innerHTML = '<p class="da-msg">Reading conditions&hellip;</p>';
+      one(t, i, true);
+    });
+  }
+
+  function renderVerdict() {
+    var bestT = null;
+    TRAILS.forEach(function (t, i) {
+      var m = models[i];
+      /* the verdict answers "where do I ride today", so a four-hour
+         drive doesn't get to win it even once it's loaded */
+      if (!m || t.away) return;
+      if (!bestT || m.now.score > bestT.m.now.score) bestT = { t: t, m: m };
+    });
+    if (!bestT) { verdictEl.hidden = true; return; }
+    var s = STATES[bestT.m.now.key];
+    verdictEl.hidden = false;
+    verdictEl.innerHTML =
+      '<span class="k">Best bet right now</span>' +
+      '<span class="n" style="color:' + s.color + '">' + esc(bestT.t.name) + "</span>" +
+      '<span class="s">' + r0(bestT.m.now.score) + " &middot; " + esc(s.label) +
+      (bestT.m.best ? " &middot; " + fmtRange(bestT.m.best.from, bestT.m.best.to) : "") + "</span>";
+  }
+
+  function stamp(at) {
+    var d = new Date(at);
+    stampEl.textContent = " Updated " + d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + ".";
+  }
+
+  /* ============================== orchestration ============================== */
+
+  var awayGrid = document.getElementById("da-away-grid");
+  var awayBtn = document.getElementById("da-away-btn");
+  var awayLoaded = false;
+
+  var cards = [];
+  TRAILS.forEach(function (t, i) {
+    var el = cardShell(t, i);
+    (t.away ? awayGrid : grid).appendChild(el);
+    cards.push(el);
+  });
+
+  var rawStore = {};
+
+  /* jobs: [{t, i}]. One request for the lot. A trail that fails to
+     build gets its own error card without dragging the others down;
+     a failed request errors them all, each with its own retry. */
+  function loadBatch(jobs, force) {
+    if (!jobs.length) return Promise.resolve();
+    return fetch(url(jobs.map(function (j) { return j.t; })), { cache: force ? "reload" : "default" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("Weather service returned " + r.status + ".");
+        return r.json();
+      })
+      .then(function (arr) {
+        if (!Array.isArray(arr)) arr = [arr];   /* one coordinate = bare object */
+        jobs.forEach(function (job, k) {
+          try {
+            var data = arr[k];
+            if (!data || !data.hourly) throw new Error("Weather service sent nothing for this spot.");
+            rawStore[keyOf(job.t)] = data;
+            models[job.i] = buildModel(job.t, data);
+            renderCard(cards[job.i], job.t, models[job.i]);
+          } catch (e) {
+            renderError(cards[job.i], job.t, job.i, "Couldn't load conditions. " + e.message);
+          }
+        });
+        renderVerdict();
+      })
+      .catch(function (e) {
+        jobs.forEach(function (job) {
+          renderError(cards[job.i], job.t, job.i, "Couldn't load conditions. " + e.message);
+        });
+      });
+  }
+
+  function one(t, i, force) { return loadBatch([{ t: t, i: i }], force); }
+
+  function loadAll(force) {
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = "Loading";
+
+    /* Observed data runs alongside the forecast pull. Cards render as
+       soon as the score is ready; these patch in when they arrive, and
+       are skipped silently if a source is down. */
+    Promise.all([loadAlerts(), loadCreeks(), loadStations()])
+      .then(function () {
+        /* Measured rain feeds the water balance, so it changes the score
+           and not just the card. Any trail already built from forecast
+           rain has to be rebuilt once the gauges land. */
+        if (EXTRA.wx) {
+          TRAILS.forEach(function (t, i) {
+            var raw = rawStore[keyOf(t)];
+            if (!raw) return;
+            try {
+              models[i] = buildModel(t, raw);
+              renderCard(cards[i], t, models[i]);
+            } catch (e) {}
+          });
+          renderVerdict();
+        }
+        applyExtra();
+      })
+      .catch(function () {});
+
+    var cached = force ? null : readCache();
+    if (cached && cached.raw) {
+      var usedAll = true;
+      TRAILS.forEach(function (t, i) {
+        var ck = keyOf(t);
+        if (cached.raw[ck]) {
+          try {
+            models[i] = buildModel(t, cached.raw[ck]);
+            rawStore[ck] = cached.raw[ck];
+            renderCard(cards[i], t, models[i]);
+            /* an away trail in the cache was asked for on a previous
+               visit, so show it rather than making them ask again */
+            if (t.away) revealAway();
+          } catch (e) { if (!t.away) usedAll = false; }
+        } else if (!t.away) { usedAll = false; }
+      });
+      renderVerdict();
+      stamp(cached.at);
+      if (usedAll) {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = "Refresh";
+        return;
+      }
+    }
+
+    /* Only the local trails on load, in ONE request. Out-of-state ones
+       join once they've been asked for, so Refresh keeps them current. */
+    var queue = TRAILS.map(function (t, i) { return { t: t, i: i }; })
+      .filter(function (j) { return !j.t.away || awayLoaded; });
+
+    loadBatch(queue, force).then(function () {
+      var at = Date.now();
+      writeCache(at, rawStore);
+      stamp(at);
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = "Refresh";
+    });
+  }
+
+  /* ==================== worth the drive ====================
+     Out-of-state areas are a deliberate second click. It keeps the page
+     quick, and it keeps us off the weather service for trips nobody is
+     taking — which matters more the longer the list gets. */
+  function revealAway() {
+    awayLoaded = true;
+    if (awayGrid) awayGrid.hidden = false;
+    if (awayBtn) awayBtn.remove();
+  }
+
+  function loadAway() {
+    if (awayLoaded) return;
+    revealAway();
+    var jobs = TRAILS.map(function (t, i) { return { t: t, i: i }; })
+      .filter(function (j) { return j.t.away && !rawStore[keyOf(j.t)]; });
+
+    loadBatch(jobs, false).then(function () {
+      writeCache(Date.now(), rawStore);
+      applyExtra();
+    });
+  }
+
+  if (awayBtn) awayBtn.addEventListener("click", loadAway);
+
+  /* ======================= request a riding area ======================= */
+
+  (function askForm() {
+    var form = document.getElementById("da-ask-form");
+    var msg = document.getElementById("da-ask-msg");
+    if (!form) return;
+
+    function fail(txt, focusId) {
+      msg.className = "da-ask-msg err";
+      msg.textContent = txt;
+      if (focusId) document.getElementById(focusId).focus();
+    }
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+
+      var area  = document.getElementById("ask-area").value.trim();
+      var town  = document.getElementById("ask-town").value.trim();
+      var dirt  = document.getElementById("ask-dirt").value.trim();
+      var email = document.getElementById("ask-email").value.trim();
+
+      if (REQUEST_EMAIL.indexOf("REPLACE") !== -1) {
+        fail("This form isn't wired up yet \u2014 REQUEST_EMAIL still needs setting in the page source.");
+        return;
+      }
+      if (!area) { fail("Which riding area? That one we need.", "ask-area"); return; }
+      if (!town) { fail("Nearest town, so we can put it on a map.", "ask-town"); return; }
+
+      var body =
+        "Riding area: " + area + "\n" +
+        "Nearest town: " + town + "\n" +
+        "Dirt notes: " + (dirt || "\u2014") + "\n" +
+        "Reply to: " + (email || "\u2014") + "\n\n" +
+        "Sent from the trail conditions page.\n";
+
+      msg.className = "da-ask-msg ok";
+      msg.textContent = "Opening your mail app \u2014 hit send and we'll take a look.";
+      window.location.href = "mailto:" + REQUEST_EMAIL +
+        "?subject=" + encodeURIComponent("Trail conditions \u2014 add " + area) +
+        "&body=" + encodeURIComponent(body);
+    });
+  })();
+
+  /* ---- If embedded in an iframe, tell the parent page how tall we are, so
+     the embed can size itself instead of showing an inner scrollbar. ---- */
+  (function reportHeight() {
+    if (window.parent === window) return;
+    var last = 0;
+    function send() {
+      var h = Math.ceil(document.documentElement.scrollHeight);
+      if (h !== last) {
+        last = h;
+        try { window.parent.postMessage({ altarDirtHeight: h }, "*"); } catch (e) {}
+      }
+    }
+    send();
+    window.addEventListener("load", send);
+    window.addEventListener("resize", send);
+    if (window.ResizeObserver) { try { new ResizeObserver(send).observe(document.body); } catch (e) {} }
+    setInterval(send, 1000);
+  })();
+
+  /* ==================== rider calibration ====================
+     Riders rate the score the model showed them, not the trail in the
+     abstract. Each submission carries the exact model inputs behind that
+     score, so the set can be used to refit the soil and aspect multipliers.
+
+     Delivery is fire-and-forget: Apps Script web apps don't return CORS
+     headers, so the browser cannot read the response. Anything that fails
+     or is sent with no signal stays in a local queue and retries later.
+     Confirm delivery in the sheet, not in the browser.
+     ============================================================ */
+
+  var RATED = {};
+
+  function reporter() {
+    try {
+      var r = JSON.parse(window.localStorage.getItem(REPORTER_KEY) || "null");
+      if (r && r.id) return r;
+    } catch (e) {}
+    return null;
+  }
+  function saveReporter(name) {
+    var r = reporter() || { id: Math.random().toString(36).slice(2, 10) + Date.now().toString(36) };
+    r.name = name;
+    try { window.localStorage.setItem(REPORTER_KEY, JSON.stringify(r)); } catch (e) {}
+    return r;
+  }
+  function queueRead() {
+    try { return JSON.parse(window.localStorage.getItem(QUEUE_KEY) || "[]"); } catch (e) { return []; }
+  }
+  function queueWrite(a) {
+    try { window.localStorage.setItem(QUEUE_KEY, JSON.stringify(a.slice(-200))); } catch (e) {}
+  }
+
+  function transmit(payloads) {
+    if (!FEEDBACK.endpoint) return false;
+    var text = JSON.stringify(payloads);
+    try {
+      if (navigator.sendBeacon &&
+          navigator.sendBeacon(FEEDBACK.endpoint, new Blob([text], { type: "text/plain;charset=UTF-8" }))) {
+        return true;
+      }
+    } catch (e) {}
+    try {
+      fetch(FEEDBACK.endpoint, {
+        method: "POST", mode: "no-cors", keepalive: true,
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+        body: text
+      });
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function flushQueue() {
+    var q = queueRead();
+    if (!q.length || !FEEDBACK.endpoint) return;
+    if (navigator.onLine === false) return;
+    if (transmit(q)) queueWrite([]);
+  }
+
+  /* hoursBack: how long ago they rode. Every model field below is taken
+     from THAT hour, not from now — otherwise a rating about this morning
+     gets filed against this evening's conditions and teaches the model
+     the wrong lesson. shown_score stays as the number they were actually
+     looking at, because that is what their verdict was a verdict on. */
+  function snapshot(t, m, hoursBack) {
+    var st = (m.stateAt && hoursBack) ? m.stateAt(hoursBack) : null;
+    var sm = st ? st.sm : m.smNow;
+    var wt = st ? st.water : m.waterNow;
+    return {
+      trail: t.name, place: t.place, lat: t.lat, lon: t.lon,
+      soil: t.soil, exposure: t.exposure,
+      shown_score: r0(m.now.score), shown_state: m.now.key,
+      /* what the model says about the hour they rode */
+      rode_score: st ? r0(st.score) : r0(m.now.score),
+      rode_state: st ? st.key : m.now.key,
+      rode_at: st ? st.time : (m.localTime || ""),
+      soil_moisture: sm == null ? "" : Math.round(sm * 1000) / 1000,
+      soil_temp_f: st ? (st.soilTemp == null ? "" : r0(st.soilTemp))
+                      : (m.soilTempNow == null ? "" : r0(m.soilTempNow)),
+      air_temp_f: st ? (st.airTemp == null ? "" : r0(st.airTemp))
+                     : (m.current.temperature_2m == null ? "" : r0(m.current.temperature_2m)),
+      rain_24h: Math.round((st ? st.p24 : m.p24) * 100) / 100,
+      rain_72h: Math.round((st ? st.p72 : m.p72) * 100) / 100,
+      hours_since_rain: st ? st.hsr : m.hsr,
+      /* the water-balance store behind the score, so a rating can be
+         matched to it when the decay constant gets calibrated */
+      water_in: wt == null ? "" : Math.round(wt * 1000) / 1000,
+      dries_out: m.recovery || "",
+      wet_mult: m.wetMult, dry_mult: Math.round(m.dryMult * 100) / 100,
+      model_time: m.localTime,
+      /* whether measured rain drove this score, and by how much it
+         disagreed with the forecast — without these a rating can't
+         separate "the model is wrong" from "the input was wrong",
+         which is the whole question calibration has to answer */
+      rain_source: m.rainSource ? m.rainSource.name : "forecast",
+      rain_source_mi: m.rainSource ? Math.round(m.rainSource.mi * 10) / 10 : "",
+      /* 1 = gauge inside WX_MAX_MI, 2 = tier-2 fallback under WX_TIER2_MI.
+         Calibration has to be able to separate these; a tier-2 row is
+         weaker evidence about this trail than a tier-1 row. */
+      rain_source_tier: m.rainSource ? m.rainSource.tier : "",
+      rain_measured: m.rainSource ? Math.round(m.rainSource.measured * 100) / 100 : "",
+      rain_forecast: m.rainSource ? Math.round(m.rainSource.forecast * 100) / 100 : "",
+      et_24h: m.rainSource && m.rainSource.et24 != null ? Math.round(m.rainSource.et24 * 1000) / 1000 : "",
+      rain_watch_gap: m.rainWatch ? Math.round((m.rainWatch.measured - m.rainWatch.forecast) * 100) / 100 : ""
+    };
+  }
+
+  /* single-select chip group */
+  function chipGroup(root, sel, onPick) {
+    var g = root.querySelector(sel);
+    if (!g) return;
+    g.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest(".da-chip") : null;
+      if (!b || !g.contains(b)) return;
+      g.querySelectorAll(".da-chip").forEach(function (x) { x.setAttribute("aria-pressed", "false"); });
+      b.setAttribute("aria-pressed", "true");
+      if (onPick) onPick(b);
+    });
+  }
+  function picked(root, sel, attr) {
+    var b = root.querySelector(sel + ' .da-chip[aria-pressed="true"]');
+    return b ? b.getAttribute(attr) : null;
+  }
+  /* Same chips, but they toggle independently — dirt can be greasy AND
+     rutting AND holding water at once, and forcing one answer would
+     throw away the combination that actually describes the day. */
+  function multiGroup(root, sel) {
+    var g = root.querySelector(sel);
+    if (!g) return;
+    g.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest(".da-chip") : null;
+      if (!b || !g.contains(b)) return;
+      b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true");
+    });
+  }
+  function pickedAll(root, sel, attr) {
+    return [].slice.call(root.querySelectorAll(sel + ' .da-chip[aria-pressed="true"]'))
+      .map(function (b) { return b.getAttribute(attr); });
+  }
+
+  function attachRating(body, t, m) {
+    if (!FEEDBACK.endpoint) return;
+    if (FEEDBACK.revealParam &&
+        window.location.search.indexOf(FEEDBACK.revealParam + "=") === -1) return;
+
+    var wrap = document.createElement("div");
+    wrap.className = "da-rate";
+    body.appendChild(wrap);
+
+    var tkey = keyOf(t);
+    if (RATED[tkey]) {
+      wrap.innerHTML = '<p class="da-rate-msg ok">Logged \u2014 thanks.</p>';
+      return;
+    }
+
+    wrap.innerHTML = '<button type="button" class="da-rate-open">Rate the accuracy of the conditions</button>';
+
+    wrap.querySelector(".da-rate-open").addEventListener("click", function () {
+      var states = ["hero", "good", "soft", "wet", "slop"];
+      var actualChips = states.map(function (k) {
+        return '<button type="button" class="da-chip" data-a="' + k + '">' + esc(STATES[k].label) + "</button>";
+      }).join("");
+      var who = reporter();
+
+      wrap.innerHTML =
+        '<p class="da-rate-q">We said <b>' + r0(m.now.score) + "</b>, " +
+          esc(STATES[m.now.key].label.toLowerCase()) + ". How did it actually ride?</p>" +
+        '<div class="da-chips" data-g="verdict">' +
+          '<button type="button" class="da-chip" data-v="1">Better than that</button>' +
+          '<button type="button" class="da-chip" data-v="0">About right</button>' +
+          '<button type="button" class="da-chip" data-v="-1">Worse than that</button>' +
+        "</div>" +
+        '<div class="da-more" hidden>' +
+          /* Ride time first, and in hours rather than "earlier today".
+             Every rating is matched against the model state at the hour
+             it describes, so an imprecise answer here quietly mislabels
+             the data \u2014 the one thing calibration cannot survive. */
+          '<p class="da-sub">When did you ride it?</p>' +
+          '<div class="da-chips" data-g="ago">' +
+            '<button type="button" class="da-chip" data-h="0" aria-pressed="true">Right now</button>' +
+            '<button type="button" class="da-chip" data-h="1">1h ago</button>' +
+            '<button type="button" class="da-chip" data-h="2">2h</button>' +
+            '<button type="button" class="da-chip" data-h="3">3h</button>' +
+            '<button type="button" class="da-chip" data-h="5">5h</button>' +
+            '<button type="button" class="da-chip" data-h="8">8h</button>' +
+            '<button type="button" class="da-chip" data-h="24">Yesterday</button>' +
+          "</div>" +
+          '<p class="da-sub">Closer to \u2014 optional</p>' +
+          '<div class="da-chips" data-g="actual">' + actualChips + "</div>" +
+          /* Multi-select. This is the diagnostic detail no score can
+             carry: "wet and grippy" and "wet and rutting" are the same
+             number and completely different answers. */
+          '<p class="da-sub">What was the dirt doing? \u2014 pick any</p>' +
+          '<div class="da-chips da-multi" data-g="surface">' +
+            '<button type="button" class="da-chip" data-s="tacky">Tacky, hooking up</button>' +
+            '<button type="button" class="da-chip" data-s="dusty">Dusty, blown out</button>' +
+            '<button type="button" class="da-chip" data-s="greasy">Greasy roots &amp; rock</button>' +
+            '<button type="button" class="da-chip" data-s="puddles">Standing water</button>' +
+            '<button type="button" class="da-chip" data-s="soft">Soft, taking a print</button>' +
+            '<button type="button" class="da-chip" data-s="rutting">Rutting behind me</button>' +
+            '<button type="button" class="da-chip" data-s="hardpack">Hardpack, fast</button>' +
+          "</div>" +
+          /* Deliberately separate from the score. A trail can ride well
+             and still be one you shouldn't be on \u2014 that gap is exactly
+             what the score cannot express on its own. */
+          '<p class="da-sub">Should someone else go ride it?</p>' +
+          '<div class="da-chips" data-g="others">' +
+            '<button type="button" class="da-chip" data-o="go">Yes, go</button>' +
+            '<button type="button" class="da-chip" data-o="light">Fine, tread light</button>' +
+            '<button type="button" class="da-chip" data-o="avoid">Leave it alone</button>' +
+          "</div>" +
+          '<input type="text" class="da-section" maxlength="60" placeholder="Which trails? \u2014 optional, big areas ride differently">' +
+          '<input type="text" class="da-note-in" maxlength="180" placeholder="Anything worth knowing \u2014 optional">' +
+          (who && who.name ? "" :
+            '<input type="text" class="da-name" maxlength="40" placeholder="Your name \u2014 so we know whose call this is">') +
+          '<button type="button" class="da-rate-send">Send it</button>' +
+          '<p class="da-rate-msg" role="status" aria-live="polite"></p>' +
+        "</div>";
+
+      var more = wrap.querySelector(".da-more");
+      var msg = wrap.querySelector(".da-rate-msg");
+
+      chipGroup(wrap, '[data-g="verdict"]', function () { more.hidden = false; });
+      chipGroup(wrap, '[data-g="actual"]');
+      chipGroup(wrap, '[data-g="ago"]');
+      chipGroup(wrap, '[data-g="others"]');
+      multiGroup(wrap, '[data-g="surface"]');
+
+      wrap.querySelector(".da-rate-send").addEventListener("click", function () {
+        var verdict = picked(wrap, '[data-g="verdict"]', "data-v");
+        if (verdict === null) {
+          msg.className = "da-rate-msg err";
+          msg.textContent = "Pick one of the three first.";
+          return;
+        }
+        var nameEl = wrap.querySelector(".da-name");
+        var who2 = reporter();
+        if (!who2 || !who2.name) {
+          var nm = nameEl ? nameEl.value.trim() : "";
+          if (!nm) {
+            msg.className = "da-rate-msg err";
+            msg.textContent = "Add your name \u2014 an unattributed rating isn't much use.";
+            if (nameEl) nameEl.focus();
+            return;
+          }
+          who2 = saveReporter(nm);
+        }
+
+        var ago = parseInt(picked(wrap, '[data-g="ago"]', "data-h") || "0", 10);
+        var payload = snapshot(t, m, ago);
+        payload.v = 4;   /* v4: ride-time snapshot, surface, others_should */
+        payload.sent_at = new Date().toISOString();
+        payload.reporter_id = who2.id;
+        payload.reporter_name = who2.name;
+        payload.verdict = parseInt(verdict, 10);
+        payload.actual = picked(wrap, '[data-g="actual"]', "data-a") || "";
+        payload.rode_hours_ago = ago;
+        /* Keep the old coarse bucket so v1–v3 rows stay comparable. */
+        payload.when = ago === 0 ? "now" : ago >= 24 ? "yesterday" : "earlier";
+        payload.surface = pickedAll(wrap, '[data-g="surface"]', "data-s").join("|");
+        payload.others_should = picked(wrap, '[data-g="others"]', "data-o") || "";
+        payload.section = wrap.querySelector(".da-section").value.trim();
+        payload.note = wrap.querySelector(".da-note-in").value.trim();
+        payload.tz_offset_min = new Date().getTimezoneOffset();
+
+        var q = queueRead();
+        q.push(payload);
+        queueWrite(q);
+        RATED[tkey] = true;
+
+        if (transmit(q)) {
+          queueWrite([]);
+          wrap.innerHTML = '<p class="da-rate-msg ok">Logged \u2014 thanks. That one actually helps.</p>';
+        } else {
+          wrap.innerHTML = '<p class="da-rate-msg ok">Saved. It\'ll send once you\'re back on signal.</p>';
+        }
+      });
+    });
+  }
+
+  window.addEventListener("online", flushQueue);
+  flushQueue();
+
+  refreshBtn.addEventListener("click", function () { loadAll(true); });
+  loadAll(false);
+})();
+</script>
+
+</body>
+</html>

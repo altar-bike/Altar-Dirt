@@ -14,8 +14,25 @@ const H = 24 * 9;
 const start = new Date("2026-08-01T00:00:00Z");
 const iso = i => new Date(start.getTime() + i*3600e3).toISOString().slice(0,16);
 const day = n => new Date(start.getTime() + n*86400e3).toISOString().slice(0,10);
-const precipitation = Array.from({length:H},(_,i)=> (i>=70&&i<78)?0.22:0);
-const hourOf=i=>i%24, wet=i=>(i<70?0.20:i<80?0.40:Math.max(0.16,0.40-(i-80)*0.004));
+/* Scaled drier on 5 Aug 2026, when Bent Creek's soil went from `rocky`
+   (wet 0.55) to `clay` (wet 1.30). The old fixture — 0.40 soil moisture
+   and 1.76" of rain — drove both penalties into their min(58,…) caps on
+   clay, so shown_score and rode_score both clipped to 0 and the snapshot
+   assertion below could no longer tell them apart. It was the fixture
+   that went out of range, not stateAt() that broke: the wetness here is
+   divided by roughly the multiplier ratio so the score lands mid-band
+   again and an 8-hour difference is still visible. Keep it off the floor
+   and off the ceiling if these numbers ever move again.
+
+   The drying curve now starts at hour 70 rather than 80. "Now" is hour 80
+   and the ride being rated is hour 72, and the old curve was flat across
+   that whole span — so the only thing separating the two snapshots was
+   the tail of the rain, worth a single point. The assertion passed on a
+   1-point margin that any change to the water term could erase. Soil
+   moisture now falls through the rated window too, which is what the
+   snapshot is actually supposed to capture. */
+const precipitation = Array.from({length:H},(_,i)=> (i>=70&&i<78)?0.09:0);
+const hourOf=i=>i%24, wet=i=>(i<70?0.18:Math.max(0.15,0.36-(i-70)*0.005));
 const hourly={time:Array.from({length:H},(_,i)=>iso(i)),
  temperature_2m:Array.from({length:H},(_,i)=>60+18*Math.sin((hourOf(i)-8)/24*2*Math.PI)),
  relative_humidity_2m:Array.from({length:H},(_,i)=>55+30*Math.cos((hourOf(i)-8)/24*2*Math.PI)),

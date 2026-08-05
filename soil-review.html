@@ -53,10 +53,19 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 <div class="wrap">
 
 <h1>Soil &amp; Exposure Review</h1>
-<p class="lede">Every soil and exposure value on the page is a guess I made. This is the sheet to correct them.</p>
+<p class="lede">Soil is now Matt's, not mine. Exposure is still every bit a guess — that's what this sheet is for.</p>
 
 <div class="note warn">
-<p><strong>Why this matters more than it looks.</strong> Seven of the ten current spots are labelled <code>rocky</code>, and <code>rocky</code> carries a wetness multiplier of <code>0.55</code> — it halves every rain penalty. So one guess of mine is suppressing the page's wet-weather response almost everywhere. Bent Creek and Ride Kanuga both sat at 30% subsoil moisture today: Bent Creek lost 8 points, Kanuga lost 14, purely because I typed <code>rocky</code> for one and <code>clay</code> for the other.</p>
+<p><strong>Soil: corrected 5 Aug 2026.</strong> Seven of the ten spots had been labelled <code>rocky</code>, which carries a wetness multiplier of <code>0.55</code> — it halved every rain penalty. Matt's read: Bent Creek, DuPont and Windrock are clay; Pisgah Lower is clay with heavy rock; North Mills and Pisgah Upper are brown dirt, clay and rock together; Hatley Pointe is loam and soft dirt because the trail is still new. Only Wilson Creek is actually <code>rocky</code>. Two in-between grades were added to hold the blends: <code>clayrock</code> and <code>blend</code>.</p>
+<p>The cost of that one wrong guess, measured: Bent Creek drops from <span class="num">87</span> to about <span class="num">68</span> and Pisgah Lower from <span class="num">69</span> to about <span class="num">41</span> on the same weather. The page had been reading two-to-three condition bands too optimistic on clay after rain.</p>
+</div>
+
+<div class="note warn">
+<p><strong>Exposure is still unverified.</strong> Every <code>exposure</code> value below is mine, including <code>mixed</code> for the Pisgah&nbsp;— Upper ridgeline, which is a straight guess about a place I have never been. Exposure multiplies drying by 0.70 / 1.00 / 1.35, so it moves scores about as hard as soil does. This is the column to go after next.</p>
+</div>
+
+<div class="note warn">
+<p><strong>Read this sheet's numbers as a ceiling, not a measurement.</strong> The scores in the table are the measured pre-relabel penalties rescaled arithmetically to the new soil classes. The rescale is exact for this hour's penalty but does not re-run the drying curve backwards, and clay sheds water at 0.75 where rocky shed at 1.40 — so the real numbers land somewhat lower still. Regenerate this sheet from the live cards once the change is deployed.</p>
 </div>
 
 <h2>What the numbers do</h2>
@@ -108,23 +117,35 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 
 </div>
 <script>
-var SOIL = { clay:{wet:1.30,dry:0.75}, loam:{wet:1.00,dry:1.00}, sandy:{wet:0.70,dry:1.30}, rocky:{wet:0.55,dry:1.40} };
+var SOIL = { clay:{wet:1.30,dry:0.75}, clayrock:{wet:1.05,dry:0.98}, loam:{wet:1.00,dry:1.00}, blend:{wet:0.95,dry:1.05}, sandy:{wet:0.70,dry:1.30}, rocky:{wet:0.55,dry:1.40} };
 var EXP  = { shaded:0.70, mixed:1.00, exposed:1.35 };
 
-/* Today's real per-trail state, read off the live cards on 5 Aug 2026.
-   subPen / watPen are the penalties the page actually applied, so
-   rescaling by the multiplier ratio is exact rather than reverse-engineered. */
+/* Per-trail state read off the live cards at 7:16 AM on 5 Aug 2026, AFTER
+   the measured-gauge payload had landed (the forecast-only first paint reads
+   much drier — see the note above the table).
+
+   IMPORTANT — provenance. `soil` here is Matt's corrected class, shipped to
+   index.html on 5 Aug 2026. But subPen / watPen were MEASURED under the old
+   labels, when seven of these ten were `rocky`. They have been rescaled by
+   wet_new / wet_old, which is exact for the instantaneous penalty and is the
+   same arithmetic the "would be" column does. They were NOT re-measured, and
+   the rescale does not re-run the drying curve backwards — clay dries at 0.75
+   where rocky dried at 1.40, so less water would actually have shed by now and
+   the true penalties run somewhat HIGHER than these. Treat every score below
+   as a ceiling until this sheet is regenerated from live cards post-deploy.
+
+   Unrescaled (soil class unchanged): Ride Kanuga, Wilson Creek, Snowshoe. */
 var TRAILS = [
-  { name:"Bent Creek",        place:"Pisgah NF",        soil:"rocky", exp:"shaded", score:92, subPen:8,  watPen:0  },
-  { name:"North Mills River", place:"Trace Ridge",      soil:"rocky", exp:"mixed",  score:99, subPen:0,  watPen:1  },
-  { name:"Pisgah — Lower",    place:"Ranger Station",   soil:"rocky", exp:"shaded", score:91, subPen:7,  watPen:1  },
-  { name:"Pisgah — Upper",    place:"Pisgah Inn",       soil:"rocky", exp:"mixed",  score:90, subPen:7,  watPen:4  },
-  { name:"DuPont",            place:"Cedar Mountain",   soil:"rocky", exp:"mixed",  score:93, subPen:7,  watPen:0  },
-  { name:"Ride Kanuga",       place:"Hendersonville",   soil:"clay",  exp:"mixed",  score:82, subPen:14, watPen:4  },
-  { name:"Wilson Creek",      place:"Collettsville",    soil:"rocky", exp:"mixed",  score:77, subPen:23, watPen:0  },
-  { name:"Hatley Pointe",     place:"Mars Hill",        soil:"clay",  exp:"shaded", score:46, subPen:33, watPen:21 },
-  { name:"Windrock",          place:"Oliver Springs TN",soil:"rocky", exp:"mixed",  score:null, subPen:0, watPen:0 },
-  { name:"Snowshoe",          place:"Snowshoe WV",      soil:"loam",  exp:"shaded", score:null, subPen:0, watPen:0 }
+  { name:"Bent Creek",        place:"Pisgah NF",        soil:"clay",     exp:"shaded", score:68, subPen:14, watPen:19 },
+  { name:"North Mills River", place:"Trace Ridge",      soil:"blend",    exp:"mixed",  score:100, subPen:0, watPen:0  },
+  { name:"Pisgah — Lower",    place:"Ranger Station",   soil:"clayrock", exp:"shaded", score:41, subPen:11, watPen:48 },
+  { name:"Pisgah — Upper",    place:"Pisgah Inn",       soil:"blend",    exp:"mixed",  score:85, subPen:10, watPen:5  },
+  { name:"DuPont",            place:"Cedar Mountain",   soil:"clay",     exp:"mixed",  score:79, subPen:14, watPen:7  },
+  { name:"Ride Kanuga",       place:"Hendersonville",   soil:"clay",     exp:"mixed",  score:84, subPen:13, watPen:3  },
+  { name:"Wilson Creek",      place:"Collettsville",    soil:"rocky",    exp:"mixed",  score:87, subPen:13, watPen:0  },
+  { name:"Hatley Pointe",     place:"Mars Hill",        soil:"loam",     exp:"shaded", score:66, subPen:15, watPen:0  },
+  { name:"Windrock",          place:"Oliver Springs TN",soil:"clay",     exp:"mixed",  score:null, subPen:0, watPen:0 },
+  { name:"Snowshoe",          place:"Snowshoe WV",      soil:"loam",     exp:"shaded", score:null, subPen:0, watPen:0 }
 ];
 
 var PENDING = [
