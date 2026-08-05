@@ -539,6 +539,27 @@ window.ALTAR_SETTINGS = {
     for (var i = idx; i >= 0; i--) if ((arr[i] || 0) >= 0.01) return idx - i;
     return Math.min(idx, 120);
   }
+
+  /* The most recent spell of real rain: how much, over how many hours,
+     and how long ago it stopped. A three-day total tells a rider almost
+     nothing — Matt read "0.98 in over 71h" as today's rain when it had
+     fallen in four hours the previous evening, which is exactly the
+     wrong conclusion to invite on the one line people actually read.
+     Gaps of up to GAP dry hours stay inside one spell, so a storm that
+     pauses for an hour isn't reported as two. */
+  function lastSoaking(arr, idx) {
+    var GAP = 3, end = -1, i;
+    for (i = idx; i >= 0; i--) if ((arr[i] || 0) >= 0.01) { end = i; break; }
+    if (end < 0) return null;
+    var start = end, gap = 0;
+    for (i = end - 1; i >= 0; i--) {
+      if ((arr[i] || 0) >= 0.01) { start = i; gap = 0; }
+      else if (++gap > GAP) break;
+    }
+    var total = 0;
+    for (i = start; i <= end; i++) total += arr[i] || 0;
+    return { inches: total, hours: end - start + 1, agoHours: idx - end, endIdx: end };
+  }
   function soilMoisture(h, i) {
     var a = h.soil_moisture_0_to_1cm ? h.soil_moisture_0_to_1cm[i] : null;
     var b = h.soil_moisture_3_to_9cm ? h.soil_moisture_3_to_9cm[i] : null;
@@ -625,6 +646,9 @@ window.ALTAR_SETTINGS = {
       name: gauge.s.name, mi: gauge.mi, hours: gHours,
       measured: gSum, forecast: fSum, et24: et24
     } : null;
+    /* Reported on every card, gauge or forecast, because "when did it
+       rain" is a question the three-day total cannot answer. */
+    var soaking = lastSoaking(precip, nowIdx);
 
     /* No gauge close enough to trust? Look further out purely to warn.
        Compares the last 24h measured there against the forecast here,
@@ -832,6 +856,7 @@ window.ALTAR_SETTINGS = {
     return {
       now: nowEval, today: today, best: best, outlook: outlook,
       recovery: recovery, waterNow: water[nowIdx], rainSource: rainSource, rainWatch: rainWatch,
+      soaking: soaking,
       hasSoil: hasSoil, nowIdx: nowIdx,
       p24: sumPrecip(precip, nowIdx, 24),
       p72: sumPrecip(precip, nowIdx, 72),
@@ -1023,6 +1048,20 @@ window.ALTAR_SETTINGS = {
       if (!best || mi < best.mi) best = { s: s, mi: mi };
     });
     return best;
+  }
+
+  /* Plain English for a soaking: how much, how fast, how long ago.
+     "0.92" in 4h, ending about 22h ago" beats a 71-hour total because a
+     rider can act on it. Intensity is in there deliberately — an inch
+     in four hours and an inch across three days leave very different
+     trails, and the score's water store can't tell them apart. */
+  function soakPhrase(s) {
+    var when;
+    if (s.agoHours <= 1) when = "still falling";
+    else if (s.agoHours < 24) when = "ended " + s.agoHours + "h ago";
+    else if (s.agoHours < 48) when = "ended yesterday";
+    else when = "ended " + Math.round(s.agoHours / 24) + " days ago";
+    return s.inches.toFixed(2) + '" in ' + s.hours + "h, " + when;
   }
 
   /* CoCoRaHS volunteer daily gauges — display-only, never scored.
@@ -1249,7 +1288,17 @@ window.ALTAR_SETTINGS = {
     }
     var rs = m && m.rainSource;
     if (rs && rs.hours >= 6) {
-      var bits2 = [rs.measured.toFixed(2) + '" measured over ' + rs.hours + "h"];
+      /* Lead with the last real soaking, not the three-day total. The
+         total answers "how much has fallen this week"; a rider is
+         asking "is it wet right now", and only the timing answers that. */
+      var bits2 = [];
+      if (m.soaking) bits2.push(soakPhrase(m.soaking));
+      /* The window total only earns its place when earlier rain adds to
+         the picture. If one spell is all there was, saying it twice
+         just buries the timing again. */
+      if (!m.soaking || rs.measured - m.soaking.inches >= 0.05) {
+        bits2.push(rs.measured.toFixed(2) + '" total over ' + rs.hours + "h");
+      }
       var gap = rs.measured - rs.forecast;
       if (Math.abs(gap) >= 0.05) {
         bits2.push("forecast said " + rs.forecast.toFixed(2) + '"');
@@ -1257,6 +1306,10 @@ window.ALTAR_SETTINGS = {
       if (rs.et24 != null) bits2.push(rs.et24.toFixed(2) + '" evaporated in 24h');
       rows += '<li><span class="da-w" style="color:#8C7D70">rain</span><span>' +
         esc(rs.name) + " · " + rs.mi.toFixed(1) + " mi — " + esc(bits2.join(", ")) + "</span></li>";
+    } else if (m && m.soaking && m.soaking.inches >= 0.05) {
+      /* Forecast-only trails deserve the timing too. */
+      rows += '<li><span class="da-w" style="color:#8C7D70">rain</span><span>' +
+        esc(soakPhrase(m.soaking)) + " (forecast)</span></li>";
     }
 
     var rw = m && m.rainWatch;
