@@ -360,6 +360,33 @@ against the real file, including a bounds check that every coordinate
 lands in the region — a regex sliding across entries would otherwise
 produce plausible numbers for the wrong trail.
 
+**First reading (5 Aug 2026, ~68 hours, one convective spell).** Small
+sample and an unrepresentative pattern, so treat the direction as the
+finding and not the magnitudes:
+
+| Trail | Gauge | Forecast | Measured | ratio | missed |
+|---|---|---|---|---|---|
+| DuPont | GUIN7 1.9 mi | 0.08" | 0.94" | **0.09** | 3h / 0.75" |
+| Pisgah — Lower | SMPN7 1.6 mi | 0.47" | 2.12" | **0.22** | 7h / 1.77" |
+| Bent Creek | 0246CA 0.8 mi | 0.39" | 0.98" | **0.40** | 4h / 0.92" |
+| North Mills River | FLET 5.5 mi | 0.33" | 0.28" | 1.18 | 2h / 0.14" |
+| Pisgah — Upper | FRYI 1.3 mi | 1.70" | 0.91" | **1.87** | 1h / 0.13" |
+
+Four of five run dry, two of them by four to ten times. Open-Meteo saw
+**9%** of the rain that fell at DuPont. It is not a bias that can be
+corrected with a constant either — at Pisgah Upper, 1.3 miles from a
+gauge, it forecast nearly double. That is what a ~10 km grid does with
+2-mile convective cells: it puts roughly the right regional total in
+roughly the wrong places.
+
+The consequence worth acting on: the four trails with a gauge inside
+`WX_MAX_MI` are protected, because measured rain replaces the forecast.
+**Ride Kanuga, Wilson Creek and Hatley Pointe are not** — they score
+from a forecast that, in this weather, saw a fraction of the real rain.
+Widening `WX_MAX_MI`, or promoting the tier-2 watch gauge to a scoring
+input when it disagrees this hard, is now a change with evidence behind
+it. Wait for a fortnight and a drier spell before deciding how far.
+
 **What to do with it after ~2 weeks:** trails with a `ratio` well under 1
 need either a wider `WX_MAX_MI`, a closer gauge, or less trust in the
 forecast component. That is the first model change with evidence behind
