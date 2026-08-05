@@ -52,6 +52,10 @@ const FIELDS = [
      rows read back as empty cells here, which is the truth of them. */
   "rain_source", "rain_source_mi", "rain_measured", "rain_forecast",
   "et_24h", "rain_watch_gap",
+  /* 5 Aug 2026: which tier the scoring gauge came from. 1 = inside
+     WX_MAX_MI, 2 = the six-mile fallback. Rows written before this date
+     read back empty and were all tier 1, since tier 2 did not exist. */
+  "rain_source_tier",
   /* v4: the hour they actually rode, and the model state at THAT hour.
      `shown_score` is still the number on screen when they tapped, so the
      verdict stays attached to what it was a verdict on; `rode_score` is
@@ -422,7 +426,12 @@ async function cocoSeries(dropped) {
   try {
     j = await cloudsJson(cloudsUrl({
       loc: CLOUDS_COCO_LOC, var: "precip",
-      start: "-2 days", end: "now", int: "1 day", obtype: "D", metadata: "no"
+      /* Four days, not two. These are people reading a tube by hand: a
+         window barely wider than the reporting lag leaves the whole
+         network looking silent whenever anyone is a day behind, and the
+         freshest-numeric-value pick below already discards the staleness
+         we don't want. Widening costs one row per observer. */
+      start: "-4 days", end: "now", int: "1 day", obtype: "D", metadata: "no"
     }));
   } catch (e) {
     if (dropped) dropped.push("coco:" + String(e.message || e).slice(0, 60));
@@ -431,7 +440,7 @@ async function cocoSeries(dropped) {
   const data = j.data || {};
   const meta = await cocoMeta();
   const out = [];
-  let unplaced = 0;
+  let unplaced = 0, noNumber = 0;
   for (const id of Object.keys(data)) {
     const byDate = data[id];
     if (!byDate || typeof byDate !== "object") continue;
@@ -448,7 +457,7 @@ async function cocoSeries(dropped) {
       if (p === null) continue;
       if (!best || d > best.date) best = { date: d, precip: p };
     }
-    if (!best) continue;
+    if (!best) { noNumber++; continue; }
     const m = meta[id];
     if (!m) { unplaced++; continue; }
     out.push({ id: id, name: m.name || id, lat: m.lat, lon: m.lon,
@@ -456,6 +465,26 @@ async function cocoSeries(dropped) {
   }
   /* One line, not one per observer — there can be dozens. */
   if (unplaced && dropped) dropped.push("coco:" + unplaced + " observers without coordinates");
+
+  /* An empty CoCoRaHS list used to be indistinguishable from a healthy
+     one: every failure path here either threw (caught above) or fell
+     through the loop leaving out=[] and dropped untouched, so the payload
+     said `coco: []` and the page drew nothing, forever, silently. On
+     5 Aug 2026 it had been returning zero rows with no diagnostic at all
+     — and this is the designated cross-check for exactly the trails with
+     no hourly gauge, so its silence was load-bearing.
+
+     Name which zero this is. The three cases have different fixes: no
+     ids means the selector or the key is wrong, ids-without-numbers means
+     the window or obtype is wrong, all-unplaced means the metadata call
+     is failing. */
+  if (!out.length && dropped) {
+    const ids = Object.keys(data).length;
+    if (!ids) dropped.push("coco:upstream returned no observers for the selector");
+    else if (noNumber >= ids) dropped.push("coco:" + ids + " observers, none with a numeric daily total");
+    else dropped.push("coco:" + ids + " observers returned, none usable (" +
+                      noNumber + " without a number, " + unplaced + " without coordinates)");
+  }
   return out;
 }
 
