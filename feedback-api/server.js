@@ -535,6 +535,12 @@ async function gradeOnce() {
   const soil = await soilPayload();
   const stampedAt = new Date().toISOString();
   const rows = [];
+  /* Each run looks three days back, so consecutive runs overlap heavily.
+     Summing them would count the same storm three times and report
+     `missed_in` of 5.43" for a day that saw 2". Grade only hours past
+     the last one already graded for this trail; the first run backfills
+     the window and every run after it adds only what is new. */
+  const mark = watermarks();
 
   for (const t of trails) {
     const g = nearestGauge(t, soil.wx);
@@ -543,15 +549,21 @@ async function gradeOnce() {
     try { om = await openMeteo(t); } catch (e) { continue; }
     const times = (om.hourly && om.hourly.time) || [];
     const fc = (om.hourly && om.hourly.precipitation) || [];
+    const since = mark[t.name] || "";
 
     /* Only hours that are genuinely past AND that the gauge reported,
        so a gauge outage reads as fewer hours rather than as fake zeroes. */
     let n = 0, fSum = 0, mSum = 0, maxErr = 0, missed = 0, phantom = 0, missedIn = 0;
+    let firstHour = null, lastHour = null;
     for (let i = 0; i < times.length; i++) {
-      const rec = g.s.hours[times[i].slice(0, 13)];
+      const hr = times[i].slice(0, 13);
+      if (since && hr <= since) continue;   /* already counted */
+      const rec = g.s.hours[hr];
       if (!rec || rec.p == null) continue;
       const f = fc[i] || 0, m = rec.p || 0;
       n++; fSum += f; mSum += m;
+      if (firstHour === null) firstHour = hr;
+      lastHour = hr;
       const err = Math.abs(f - m);
       if (err > maxErr) maxErr = err;
       /* the two failures that matter, kept apart: rain the forecast did
@@ -572,6 +584,7 @@ async function gradeOnce() {
 
     rows.push({
       at: stampedAt, trail: t.name, gauge: g.s.id, gauge_mi: Math.round(g.mi * 10) / 10,
+      first_hour: firstHour, last_hour: lastHour,
       hours: n,
       forecast_in: Math.round(fSum * 100) / 100,
       measured_in: Math.round(mSum * 100) / 100,
@@ -603,11 +616,26 @@ function gradeHistory() {
   return out;
 }
 
+/* Latest hour already graded, per trail. Rows written before the
+   watermark existed have no `last_hour`; they are ignored here, which
+   means the first run after this change re-grades their window once and
+   then stops. A single overlap beats carrying a permanent triple-count. */
+function watermarks() {
+  const out = {};
+  for (const r of gradeHistory()) {
+    if (!r.last_hour) continue;
+    if (!out[r.trail] || r.last_hour > out[r.trail]) out[r.trail] = r.last_hour;
+  }
+  return out;
+}
+
 /* Per-trail rollup: the answer to "how much should I trust the forecast
    here", which is the whole point of collecting this. */
 function gradeSummary() {
   const by = {};
   for (const r of gradeHistory()) {
+    /* Legacy overlapping rows would inflate every total. */
+    if (!r.last_hour) continue;
     const k = r.trail;
     const b = (by[k] = by[k] || {
       trail: k, gauge: r.gauge, gauge_mi: r.gauge_mi, runs: 0,
