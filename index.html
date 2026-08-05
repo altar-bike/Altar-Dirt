@@ -274,6 +274,11 @@ window.ALTAR_SETTINGS = {
 }
 #dirt-app .da-chip:hover{border-color:var(--rust);color:var(--rust);}
 #dirt-app .da-chip[aria-pressed="true"]{border-color:var(--rust);background:var(--rust);color:var(--forge);}
+/* Multi-select reads as tinted rather than filled, so a group you can
+   pick several from never looks like a group you can only pick one from. */
+#dirt-app .da-multi .da-chip[aria-pressed="true"]{
+  background:rgba(184,92,42,.20);color:var(--rust);border-color:var(--rust);
+}
 #dirt-app .da-rate input{
   width:100%;background:var(--forge);border:1px solid var(--line);color:var(--ash);
   font-family:'Lora',Georgia,serif;font-size:14px;padding:9px 11px;margin-top:12px;
@@ -867,7 +872,25 @@ window.ALTAR_SETTINGS = {
       smNow: soilMoisture(h, nowIdx),
       soilTempNow: h.soil_temperature_6cm ? h.soil_temperature_6cm[nowIdx] : null,
       wetMult: soilMult, dryMult: dryMult,
-      localTime: data.current.time
+      localTime: data.current.time,
+      /* The model state at the hour a rider ACTUALLY rode, not the hour
+         they happened to open the page. A rating logged at 8pm about a
+         9am ride was previously stored against the 8pm snapshot, which
+         made it worse than useless for calibration — it labelled the
+         wrong conditions. The hourly arrays are right here; use them. */
+      stateAt: function (hoursBack) {
+        var i = nowIdx - Math.max(0, Math.round(hoursBack || 0));
+        if (i < 0) i = 0;
+        var e = evaluate(i);
+        return {
+          idx: i, time: times[i], score: e.score, key: e.key,
+          water: water[i], sm: soilMoisture(h, i),
+          soilTemp: h.soil_temperature_6cm ? h.soil_temperature_6cm[i] : null,
+          airTemp: h.temperature_2m ? h.temperature_2m[i] : null,
+          p24: sumPrecip(precip, i, 24), p72: sumPrecip(precip, i, 72),
+          hsr: hoursSinceRain(precip, i)
+        };
+      }
     };
   }
 
@@ -1786,20 +1809,34 @@ window.ALTAR_SETTINGS = {
     if (transmit(q)) queueWrite([]);
   }
 
-  function snapshot(t, m) {
+  /* hoursBack: how long ago they rode. Every model field below is taken
+     from THAT hour, not from now — otherwise a rating about this morning
+     gets filed against this evening's conditions and teaches the model
+     the wrong lesson. shown_score stays as the number they were actually
+     looking at, because that is what their verdict was a verdict on. */
+  function snapshot(t, m, hoursBack) {
+    var st = (m.stateAt && hoursBack) ? m.stateAt(hoursBack) : null;
+    var sm = st ? st.sm : m.smNow;
+    var wt = st ? st.water : m.waterNow;
     return {
       trail: t.name, place: t.place, lat: t.lat, lon: t.lon,
       soil: t.soil, exposure: t.exposure,
       shown_score: r0(m.now.score), shown_state: m.now.key,
-      soil_moisture: m.smNow == null ? "" : Math.round(m.smNow * 1000) / 1000,
-      soil_temp_f: m.soilTempNow == null ? "" : r0(m.soilTempNow),
-      air_temp_f: m.current.temperature_2m == null ? "" : r0(m.current.temperature_2m),
-      rain_24h: Math.round(m.p24 * 100) / 100,
-      rain_72h: Math.round(m.p72 * 100) / 100,
-      hours_since_rain: m.hsr,
+      /* what the model says about the hour they rode */
+      rode_score: st ? r0(st.score) : r0(m.now.score),
+      rode_state: st ? st.key : m.now.key,
+      rode_at: st ? st.time : (m.localTime || ""),
+      soil_moisture: sm == null ? "" : Math.round(sm * 1000) / 1000,
+      soil_temp_f: st ? (st.soilTemp == null ? "" : r0(st.soilTemp))
+                      : (m.soilTempNow == null ? "" : r0(m.soilTempNow)),
+      air_temp_f: st ? (st.airTemp == null ? "" : r0(st.airTemp))
+                     : (m.current.temperature_2m == null ? "" : r0(m.current.temperature_2m)),
+      rain_24h: Math.round((st ? st.p24 : m.p24) * 100) / 100,
+      rain_72h: Math.round((st ? st.p72 : m.p72) * 100) / 100,
+      hours_since_rain: st ? st.hsr : m.hsr,
       /* the water-balance store behind the score, so a rating can be
          matched to it when the decay constant gets calibrated */
-      water_in: m.waterNow == null ? "" : Math.round(m.waterNow * 1000) / 1000,
+      water_in: wt == null ? "" : Math.round(wt * 1000) / 1000,
       dries_out: m.recovery || "",
       wet_mult: m.wetMult, dry_mult: Math.round(m.dryMult * 100) / 100,
       model_time: m.localTime,
@@ -1831,6 +1868,22 @@ window.ALTAR_SETTINGS = {
   function picked(root, sel, attr) {
     var b = root.querySelector(sel + ' .da-chip[aria-pressed="true"]');
     return b ? b.getAttribute(attr) : null;
+  }
+  /* Same chips, but they toggle independently — dirt can be greasy AND
+     rutting AND holding water at once, and forcing one answer would
+     throw away the combination that actually describes the day. */
+  function multiGroup(root, sel) {
+    var g = root.querySelector(sel);
+    if (!g) return;
+    g.addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest(".da-chip") : null;
+      if (!b || !g.contains(b)) return;
+      b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true");
+    });
+  }
+  function pickedAll(root, sel, attr) {
+    return [].slice.call(root.querySelectorAll(sel + ' .da-chip[aria-pressed="true"]'))
+      .map(function (b) { return b.getAttribute(attr); });
   }
 
   function attachRating(body, t, m) {
@@ -1866,15 +1919,46 @@ window.ALTAR_SETTINGS = {
           '<button type="button" class="da-chip" data-v="-1">Worse than that</button>' +
         "</div>" +
         '<div class="da-more" hidden>' +
+          /* Ride time first, and in hours rather than "earlier today".
+             Every rating is matched against the model state at the hour
+             it describes, so an imprecise answer here quietly mislabels
+             the data \u2014 the one thing calibration cannot survive. */
+          '<p class="da-sub">When did you ride it?</p>' +
+          '<div class="da-chips" data-g="ago">' +
+            '<button type="button" class="da-chip" data-h="0" aria-pressed="true">Right now</button>' +
+            '<button type="button" class="da-chip" data-h="1">1h ago</button>' +
+            '<button type="button" class="da-chip" data-h="2">2h</button>' +
+            '<button type="button" class="da-chip" data-h="3">3h</button>' +
+            '<button type="button" class="da-chip" data-h="5">5h</button>' +
+            '<button type="button" class="da-chip" data-h="8">8h</button>' +
+            '<button type="button" class="da-chip" data-h="24">Yesterday</button>' +
+          "</div>" +
           '<p class="da-sub">Closer to \u2014 optional</p>' +
           '<div class="da-chips" data-g="actual">' + actualChips + "</div>" +
-          '<p class="da-sub">When</p>' +
-          '<div class="da-chips" data-g="when">' +
-            '<button type="button" class="da-chip" data-w="now" aria-pressed="true">Riding now</button>' +
-            '<button type="button" class="da-chip" data-w="earlier">Earlier today</button>' +
-            '<button type="button" class="da-chip" data-w="yesterday">Yesterday</button>' +
+          /* Multi-select. This is the diagnostic detail no score can
+             carry: "wet and grippy" and "wet and rutting" are the same
+             number and completely different answers. */
+          '<p class="da-sub">What was the dirt doing? \u2014 pick any</p>' +
+          '<div class="da-chips da-multi" data-g="surface">' +
+            '<button type="button" class="da-chip" data-s="tacky">Tacky, hooking up</button>' +
+            '<button type="button" class="da-chip" data-s="dusty">Dusty, blown out</button>' +
+            '<button type="button" class="da-chip" data-s="greasy">Greasy roots &amp; rock</button>' +
+            '<button type="button" class="da-chip" data-s="puddles">Standing water</button>' +
+            '<button type="button" class="da-chip" data-s="soft">Soft, taking a print</button>' +
+            '<button type="button" class="da-chip" data-s="rutting">Rutting behind me</button>' +
+            '<button type="button" class="da-chip" data-s="hardpack">Hardpack, fast</button>' +
           "</div>" +
-          '<input type="text" class="da-note" maxlength="180" placeholder="Anything worth knowing \u2014 optional">' +
+          /* Deliberately separate from the score. A trail can ride well
+             and still be one you shouldn't be on \u2014 that gap is exactly
+             what the score cannot express on its own. */
+          '<p class="da-sub">Should someone else go ride it?</p>' +
+          '<div class="da-chips" data-g="others">' +
+            '<button type="button" class="da-chip" data-o="go">Yes, go</button>' +
+            '<button type="button" class="da-chip" data-o="light">Fine, tread light</button>' +
+            '<button type="button" class="da-chip" data-o="avoid">Leave it alone</button>' +
+          "</div>" +
+          '<input type="text" class="da-section" maxlength="60" placeholder="Which trails? \u2014 optional, big areas ride differently">' +
+          '<input type="text" class="da-note-in" maxlength="180" placeholder="Anything worth knowing \u2014 optional">' +
           (who && who.name ? "" :
             '<input type="text" class="da-name" maxlength="40" placeholder="Your name \u2014 so we know whose call this is">') +
           '<button type="button" class="da-rate-send">Send it</button>' +
@@ -1886,7 +1970,9 @@ window.ALTAR_SETTINGS = {
 
       chipGroup(wrap, '[data-g="verdict"]', function () { more.hidden = false; });
       chipGroup(wrap, '[data-g="actual"]');
-      chipGroup(wrap, '[data-g="when"]');
+      chipGroup(wrap, '[data-g="ago"]');
+      chipGroup(wrap, '[data-g="others"]');
+      multiGroup(wrap, '[data-g="surface"]');
 
       wrap.querySelector(".da-rate-send").addEventListener("click", function () {
         var verdict = picked(wrap, '[data-g="verdict"]', "data-v");
@@ -1908,15 +1994,21 @@ window.ALTAR_SETTINGS = {
           who2 = saveReporter(nm);
         }
 
-        var payload = snapshot(t, m);
-        payload.v = 3;   /* v3 added rain_source/rain_measured/et_24h */
+        var ago = parseInt(picked(wrap, '[data-g="ago"]', "data-h") || "0", 10);
+        var payload = snapshot(t, m, ago);
+        payload.v = 4;   /* v4: ride-time snapshot, surface, others_should */
         payload.sent_at = new Date().toISOString();
         payload.reporter_id = who2.id;
         payload.reporter_name = who2.name;
         payload.verdict = parseInt(verdict, 10);
         payload.actual = picked(wrap, '[data-g="actual"]', "data-a") || "";
-        payload.when = picked(wrap, '[data-g="when"]', "data-w") || "now";
-        payload.note = wrap.querySelector(".da-note").value.trim();
+        payload.rode_hours_ago = ago;
+        /* Keep the old coarse bucket so v1–v3 rows stay comparable. */
+        payload.when = ago === 0 ? "now" : ago >= 24 ? "yesterday" : "earlier";
+        payload.surface = pickedAll(wrap, '[data-g="surface"]', "data-s").join("|");
+        payload.others_should = picked(wrap, '[data-g="others"]', "data-o") || "";
+        payload.section = wrap.querySelector(".da-section").value.trim();
+        payload.note = wrap.querySelector(".da-note-in").value.trim();
         payload.tz_offset_min = new Date().getTimezoneOffset();
 
         var q = queueRead();

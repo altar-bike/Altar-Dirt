@@ -76,6 +76,43 @@ eq("null stays null", normaliseMoisture(null), null);
 eq("a saturated fraction is not mistaken for a percentage", normaliseMoisture(0.6), 0.6);
 
 /* ---------------------------------------------------------------
+   parseTrails — the grader reads trail coordinates out of the live
+   index.html so there is only one copy of the list. If this regex
+   ever stops matching, the grader silently scores nothing; if it
+   matches the WRONG numbers it scores the wrong places, which is
+   worse. Checked against the real file, not a fixture.
+   --------------------------------------------------------------- */
+const parseTrails = lift("parseTrails");
+const page = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+const parsed = parseTrails(page);
+
+if (!parsed) {
+  problems.push("parseTrails found no trails in the real index.html");
+} else {
+  const names = parsed.map((t) => t.name);
+  ["Bent Creek", "Pisgah — Lower", "Pisgah — Upper", "Hatley Pointe", "Snowshoe"]
+    .forEach((n) => { if (!names.includes(n)) problems.push("parseTrails missed " + n); });
+
+  const bent = parsed.find((t) => t.name === "Bent Creek");
+  if (bent && (Math.abs(bent.lat - 35.4919) > 1e-4 || Math.abs(bent.lon + 82.6285) > 1e-4)) {
+    problems.push("Bent Creek coords wrong: " + JSON.stringify(bent));
+  }
+  /* Every trail must land in western NC / east TN / WV — a regex that
+     slid across entries would produce a plausible-looking number from
+     the wrong trail, and only a bounds check catches that. */
+  parsed.forEach((t) => {
+    if (!(t.lat > 34 && t.lat < 39.5 && t.lon > -85 && t.lon < -79)) {
+      problems.push("coordinate out of region for " + t.name + ": " + t.lat + "," + t.lon);
+    }
+  });
+  /* Sanity: the count should track the real list, not silently halve. */
+  const declared = (page.match(/\n    \{ name: "/g) || []).length;
+  if (declared && parsed.length !== declared) {
+    problems.push("parsed " + parsed.length + " trails but index.html declares " + declared);
+  }
+}
+
+/* ---------------------------------------------------------------
    milesBetween — every gauge threshold in the page depends on it.
    --------------------------------------------------------------- */
 const milesBetween = lift("milesBetween");
@@ -88,4 +125,6 @@ if (problems.length) {
   console.error("FAIL\n\n" + problems.join("\n\n"));
   process.exit(1);
 }
-console.log("PASS — locVariants, normaliseMoisture, milesBetween");
+console.log("parsed " + (parsed ? parsed.length : 0) + " trails from index.html: " +
+  (parsed || []).map((t) => t.name).join(", "));
+console.log("PASS — locVariants, parseTrails, normaliseMoisture, milesBetween");

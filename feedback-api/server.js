@@ -52,6 +52,13 @@ const FIELDS = [
      rows read back as empty cells here, which is the truth of them. */
   "rain_source", "rain_source_mi", "rain_measured", "rain_forecast",
   "et_24h", "rain_watch_gap",
+  /* v4: the hour they actually rode, and the model state at THAT hour.
+     `shown_score` is still the number on screen when they tapped, so the
+     verdict stays attached to what it was a verdict on; `rode_score` is
+     what to fit against. `others_should` is deliberately separate from
+     the score — a trail can ride well and still be one to stay off. */
+  "rode_hours_ago", "rode_at", "rode_score", "rode_state",
+  "surface", "others_should", "section",
   "lat", "lon", "v"
 ];
 const CSV_HEADER = FIELDS.concat(["known_crew", "received_at"]);
@@ -452,6 +459,181 @@ async function cocoSeries(dropped) {
   return out;
 }
 
+/* ==================== forecast grading ====================
+   Every day, ask a plain question with a measurable answer: how much
+   rain did Open-Meteo say fell on each trail, and how much did the
+   nearest gauge actually catch?
+
+   This exists because the model's whole wetness story runs on forecast
+   rain, and on 3 Aug 2026 Open-Meteo reported 0.00 in for a Bent Creek
+   storm that a gauge 0.8 mi away measured at 0.92. That was found by
+   hand, after Matt noticed a card looked wrong. Nobody should have to
+   notice. Two weeks of this turns "the forecast seems off" into a
+   number per trail, and it needs no riders to produce.
+   ========================================================== */
+
+const GRADE_FILE = path.join(DATA_DIR, "forecast-grade.jsonl");
+const GRADE_MAX_MI = 6;            // a gauge further out grades nothing useful
+const GRADE_EVERY_MS = 24 * 3600 * 1000;
+const PAGE_URL = process.env.PAGE_URL || "https://altar-bike.github.io/Altar-Dirt/";
+
+/* The trail list lives in index.html and that stays the single source of
+   truth — a second copy here would drift the first time Matt adds a spot,
+   and a grader silently scoring the wrong coordinates is worse than no
+   grader. Parsed from the live page once a day, with the last good list
+   cached in memory so a fetch failure costs nothing. */
+let trailCache = { at: 0, list: null };
+function parseTrails(html) {
+  const block = html.match(/var TRAILS = \[([\s\S]*?)\n\s*\];/);
+  if (!block) return null;
+  const out = [];
+  const re = /name:\s*"([^"]+)"[^{}]*?lat:\s*(-?[\d.]+),\s*lon:\s*(-?[\d.]+)/g;
+  let x;
+  while ((x = re.exec(block[1])) !== null) {
+    const lat = parseFloat(x[2]), lon = parseFloat(x[3]);
+    if (isFinite(lat) && isFinite(lon)) out.push({ name: x[1], lat: lat, lon: lon });
+  }
+  return out.length ? out : null;
+}
+async function trailPoints() {
+  if (trailCache.list && Date.now() - trailCache.at < GRADE_EVERY_MS) return trailCache.list;
+  try {
+    const r = await fetch(PAGE_URL, { headers: { "User-Agent": "AltarCycles-TrailConditions" } });
+    const list = parseTrails(await r.text());
+    if (list) trailCache = { at: Date.now(), list: list };
+  } catch (e) { /* keep whatever we had */ }
+  return trailCache.list;
+}
+
+const OM_HOURLY = "precipitation";
+async function openMeteo(t) {
+  const u = new URL("https://api.open-meteo.com/v1/forecast");
+  Object.entries({
+    latitude: t.lat, longitude: t.lon, hourly: OM_HOURLY,
+    daily: "precipitation_sum", past_days: 2, forecast_days: 6,
+    precipitation_unit: "inch", timezone: "auto"
+  }).forEach(([k, v]) => u.searchParams.set(k, v));
+  const r = await fetch(u.toString());
+  if (!r.ok) throw new Error("open-meteo " + r.status);
+  return r.json();
+}
+
+function nearestGauge(t, wx) {
+  let best = null;
+  for (const s of wx || []) {
+    if (s.lat == null || s.lon == null || !s.hours) continue;
+    const mi = milesBetween(t.lat, t.lon, s.lat, s.lon);
+    if (mi > GRADE_MAX_MI) continue;
+    if (!best || mi < best.mi) best = { s: s, mi: mi };
+  }
+  return best;
+}
+
+async function gradeOnce() {
+  const trails = await trailPoints();
+  if (!trails) return { error: "could not read the trail list from the page" };
+  const soil = await soilPayload();
+  const stampedAt = new Date().toISOString();
+  const rows = [];
+
+  for (const t of trails) {
+    const g = nearestGauge(t, soil.wx);
+    if (!g) continue;                       /* nothing to grade against */
+    let om;
+    try { om = await openMeteo(t); } catch (e) { continue; }
+    const times = (om.hourly && om.hourly.time) || [];
+    const fc = (om.hourly && om.hourly.precipitation) || [];
+
+    /* Only hours that are genuinely past AND that the gauge reported,
+       so a gauge outage reads as fewer hours rather than as fake zeroes. */
+    let n = 0, fSum = 0, mSum = 0, maxErr = 0, missed = 0, phantom = 0, missedIn = 0;
+    for (let i = 0; i < times.length; i++) {
+      const rec = g.s.hours[times[i].slice(0, 13)];
+      if (!rec || rec.p == null) continue;
+      const f = fc[i] || 0, m = rec.p || 0;
+      n++; fSum += f; mSum += m;
+      const err = Math.abs(f - m);
+      if (err > maxErr) maxErr = err;
+      /* the two failures that matter, kept apart: rain the forecast did
+         not see at all, and rain it invented */
+      if (m >= 0.05 && f < 0.01) { missed++; missedIn += m; }
+      if (f >= 0.05 && m < 0.01) phantom++;
+    }
+    if (n < 6) continue;
+
+    /* Archive the forward forecast so lead-time accuracy can be graded
+       later against gauges that haven't reported yet. */
+    const ahead = [];
+    if (om.daily && om.daily.time) {
+      for (let d = 0; d < om.daily.time.length; d++) {
+        ahead.push({ d: om.daily.time[d], p: om.daily.precipitation_sum[d] });
+      }
+    }
+
+    rows.push({
+      at: stampedAt, trail: t.name, gauge: g.s.id, gauge_mi: Math.round(g.mi * 10) / 10,
+      hours: n,
+      forecast_in: Math.round(fSum * 100) / 100,
+      measured_in: Math.round(mSum * 100) / 100,
+      bias_in: Math.round((fSum - mSum) * 100) / 100,
+      max_hour_err_in: Math.round(maxErr * 100) / 100,
+      missed_hours: missed, missed_in: Math.round(missedIn * 100) / 100,
+      phantom_hours: phantom,
+      ahead: ahead
+    });
+  }
+
+  if (rows.length) {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.appendFileSync(GRADE_FILE, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    } catch (e) { /* grading must never take the service down */ }
+  }
+  return { at: stampedAt, graded: rows.length, rows: rows };
+}
+
+function gradeHistory() {
+  let raw;
+  try { raw = fs.readFileSync(GRADE_FILE, "utf8"); } catch (e) { return []; }
+  const out = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try { out.push(JSON.parse(line)); } catch (e) { /* skip */ }
+  }
+  return out;
+}
+
+/* Per-trail rollup: the answer to "how much should I trust the forecast
+   here", which is the whole point of collecting this. */
+function gradeSummary() {
+  const by = {};
+  for (const r of gradeHistory()) {
+    const k = r.trail;
+    const b = (by[k] = by[k] || {
+      trail: k, gauge: r.gauge, gauge_mi: r.gauge_mi, runs: 0,
+      hours: 0, forecast_in: 0, measured_in: 0, missed_hours: 0,
+      missed_in: 0, phantom_hours: 0, worst_hour_in: 0
+    });
+    b.runs++; b.hours += r.hours;
+    b.forecast_in += r.forecast_in; b.measured_in += r.measured_in;
+    b.missed_hours += r.missed_hours; b.missed_in += r.missed_in;
+    b.phantom_hours += r.phantom_hours;
+    if (r.max_hour_err_in > b.worst_hour_in) b.worst_hour_in = r.max_hour_err_in;
+  }
+  return Object.values(by).map(function (b) {
+    const round = (x) => Math.round(x * 100) / 100;
+    return {
+      trail: b.trail, gauge: b.gauge, gauge_mi: b.gauge_mi,
+      runs: b.runs, hours: b.hours,
+      forecast_in: round(b.forecast_in), measured_in: round(b.measured_in),
+      /* >1 means the forecast runs wet here, <1 means it runs dry */
+      ratio: b.measured_in > 0.05 ? round(b.forecast_in / b.measured_in) : null,
+      missed_hours: b.missed_hours, missed_in: round(b.missed_in),
+      phantom_hours: b.phantom_hours, worst_hour_in: round(b.worst_hour_in)
+    };
+  }).sort((a, b) => (a.ratio == null ? 9 : a.ratio) - (b.ratio == null ? 9 : b.ratio));
+}
+
 async function soilPayload() {
   if (soilCache.payload && Date.now() - soilCache.at < SOIL_TTL) return soilCache.payload;
   if (!CLOUDS_HASH) return { stations: [], wx: [], coco: [], note: "CLOUDS_HASH not set" };
@@ -695,6 +877,41 @@ const server = http.createServer(function (req, res) {
     return;
   }
 
+  /* How wrong has the forecast been, per trail. Token-gated because it
+     is diagnostic rather than something a rider needs. */
+  if (req.method === "GET" && url.pathname === "/grade") {
+    if (!tokenOk(url.searchParams.get("token"))) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      return res.end("Forbidden");
+    }
+    const run = url.searchParams.get("run");
+    const finish = function (extra) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(Object.assign({
+        summary: gradeSummary(), runs: gradeHistory().length
+      }, extra || {})));
+    };
+    if (run) gradeOnce().then((r) => finish({ ran: r })).catch((e) => finish({ ran: { error: String(e.message || e) } }));
+    else finish();
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/grade.csv") {
+    if (!tokenOk(url.searchParams.get("token"))) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      return res.end("Forbidden");
+    }
+    const cols = ["at", "trail", "gauge", "gauge_mi", "hours", "forecast_in",
+      "measured_in", "bias_in", "max_hour_err_in", "missed_hours", "missed_in", "phantom_hours"];
+    let out = cols.join(",") + "\n";
+    for (const r of gradeHistory()) out += cols.map((c) => csvCell(r[c])).join(",") + "\n";
+    res.writeHead(200, {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="altar-forecast-grade.csv"'
+    });
+    return res.end(out);
+  }
+
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not found");
 });
@@ -703,3 +920,22 @@ server.listen(PORT, function () {
   console.log("feedback service on :" + PORT + ", data at " + DATA_FILE +
     (EXPORT_TOKEN ? "" : "  [WARN: EXPORT_TOKEN not set — export disabled]"));
 });
+
+/* Grade the forecast daily, in-process. A minute after boot rather than
+   immediately, so a redeploy never has the grader competing with the
+   first visitor for the CLOUDS cache. Wrapped so a failure here can
+   never take the service down — the ratings endpoint matters more than
+   the diagnostics do. Deploys are frequent enough that this will
+   sometimes run twice in a day; duplicate rows are harmless because the
+   summary averages over runs. */
+function scheduleGrading() {
+  const run = function () {
+    gradeOnce()
+      .then(function (r) { console.log("forecast grade: " + JSON.stringify(r.graded !== undefined ? { graded: r.graded } : r)); })
+      .catch(function (e) { console.log("forecast grade failed: " + (e && e.message)); });
+  };
+  setTimeout(run, 60 * 1000).unref?.();
+  setInterval(run, GRADE_EVERY_MS).unref?.();
+}
+if (CLOUDS_HASH) scheduleGrading();
+else console.log("forecast grading off — CLOUDS_HASH not set, no gauges to grade against");

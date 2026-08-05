@@ -14,17 +14,18 @@ A single static HTML page that scores mountain bike trail rideability from weath
 
 Hosted on **GitHub Pages** from this repo. Linked from the Shopify nav at altar.bike.
 
-## Deployed state (as of 2026-08-04 evening)
+## Deployed state (as of 2026-08-05)
 
 Ten cards: eight local (Pisgah split Lower/Upper) + two `away`. The
-whole local list loads in ONE Open-Meteo request. `/soil` now carries
-three blocks: `stations` (soil), `wx` (hourly rain gauges), `coco`
-(volunteer daily rain, cross-check only, `rain·d` row on trails with no
-scoring gauge). Ratings payload is v3 — carries `rain_source`,
-`rain_measured`/`rain_forecast`, `et_24h`, `rain_watch_gap` so a rating
-can separate "model wrong" from "input wrong". The first three CSV rows
-predate v3: two are deploy-test rows named "TEST — delete me" (filter
-them), one is real (Matt, Bent Creek, 4 Aug).
+whole local list loads in ONE Open-Meteo request. `/soil` carries
+`stations` (soil), `wx` (hourly rain gauges) and `coco` (volunteer daily
+rain, cross-check only, `rain·d` row on trails with no scoring gauge),
+plus `stale`/`dropped` diagnostics. Rain rows lead with **when** a
+soaking fell, not a three-day total. Ratings payload is **v4** — ride
+time, per-hour model snapshot, surface multi-select, stewardship call.
+Forecast grading runs daily in-process; see its section below. The first
+three CSV rows predate v3: two are deploy-test rows named "TEST — delete
+me" (filter them), one is real (Matt, Bent Creek, 4 Aug).
 
 - **Repo:** `altar-bike/Altar-Dirt` (public — Pages requires it). A `.nojekyll`
   file at root is required; Jekyll chokes on the Liquid examples in this file.
@@ -100,9 +101,6 @@ them), one is real (Matt, Bent Creek, 4 Aug).
   effect. Never assume a variable change is isolated — check what commit
   went out with it.
 
-  Installing the Railway GitHub app on the altar-bike org removes all of
-  this. **Needs Matt** — it's a permission grant on his org, and it is now
-  the single highest-leverage chore on the list.
 - **Daily morning update** runs as a scheduled Claude task, ~6:47am ET
   every day (`trig_012nabCYGc56b1bwQwcjKUxg`). Push only, no email —
   Matt's call: he does not want a notification per rating, this note
@@ -323,6 +321,50 @@ in daylight, since the crossing often happens overnight and "dries out
 2am" is true and useless. `water_in` and `dries_out` ride along in the
 ratings payload so a rider's verdict can be matched against both.
 
+## Forecast grading — the loop that needs no riders
+
+Running in-process on the feedback service since 5 Aug 2026: once a day
+it asks a question with a measurable answer. *How much rain did
+Open-Meteo say fell on each trail, and how much did the nearest gauge
+actually catch?*
+
+This exists because the Bent Creek miss on 3 Aug — 0.00 in forecast
+against 0.92 in measured 0.8 mi away — was found by hand, after Matt
+noticed a card looked wrong. Nobody should have to notice.
+
+- `GET /grade?token=…` — per-trail rollup. `ratio` is the headline:
+  forecast inches ÷ measured inches. Above 1 the forecast runs wet here,
+  below 1 it runs dry. Sorted driest-first, so the trail the forecast is
+  most dangerously optimistic about is the top row.
+- `GET /grade?token=…&run=1` — grade immediately instead of waiting.
+- `GET /grade.csv?token=…` — every run, for working outside the service.
+- Stored at `DATA_DIR/forecast-grade.jsonl`, one line per trail per run.
+
+`missed_hours` / `missed_in` count hours where the gauge caught rain and
+the forecast had essentially none — the Bent Creek failure mode, and the
+one that hurts, because the score reads dry on a wet trail.
+`phantom_hours` is the opposite and matters much less. They are kept
+apart deliberately; a single mean error would average the dangerous
+failure into the harmless one.
+
+Each row also archives the forward daily forecast (`ahead`), so lead-time
+accuracy can be graded later against gauges that have not reported yet.
+Nothing consumes that yet — it is there so the data exists when someone
+wants to ask whether day 4 of the outlook is worth showing.
+
+**The trail list is read from the live `index.html`**, parsed once a day
+by `parseTrails()`. A second copy in the server would drift the first
+time Matt adds a spot, and a grader silently scoring the wrong
+coordinates is worse than no grader. `server-test.mjs` checks the parser
+against the real file, including a bounds check that every coordinate
+lands in the region — a regex sliding across entries would otherwise
+produce plausible numbers for the wrong trail.
+
+**What to do with it after ~2 weeks:** trails with a `ratio` well under 1
+need either a wider `WX_MAX_MI`, a closer gauge, or less trust in the
+forecast component. That is the first model change with evidence behind
+it rather than judgment.
+
 ## Task: recalibrate the model
 
 This is the highest-value recurring work. Riders rate the **score** the page showed them, not the trail in the abstract, and each rating is stored beside the exact model inputs that produced it.
@@ -339,6 +381,36 @@ Current values, all of which are **my original guesses and unvalidated**:
 Tacky band: wetness between **0.11 and 0.27** m³/m³. Above 0.27 takes a penalty, below 0.11 reads as blown out. Also generic loam, also a guess.
 
 **Exposure** multipliers stack on `dry`: shaded 0.70, mixed 1.00, exposed 1.35.
+
+### What a rating carries (v4, 5 Aug 2026)
+
+The form is clickable end to end with one free-text field kept for
+whatever the chips do not cover.
+
+- **`rode_hours_ago`** and **`rode_at`** — ride time in hours, not
+  "earlier today". Everything model-side in the row is snapshotted at
+  *that* hour via `m.stateAt()`, so a rating logged at 8pm about a 9am
+  ride is filed against 9am conditions. Before v4 it was filed against
+  8pm, which labelled the wrong weather and made the row worse than
+  useless. `shown_score` is still the number that was on screen when they
+  tapped, because that is what the verdict was a verdict on;
+  **`rode_score` is the one to fit against.**
+- **`surface`** — multi-select, pipe-joined: tacky, dusty, greasy,
+  puddles, soft, rutting, hardpack. Carries what a single number cannot:
+  "wet and grippy" and "wet and rutting" score identically and mean
+  opposite things.
+- **`others_should`** — go / light / avoid. Deliberately separate from
+  the score. Matt rated Bent Creek "90ish" on a morning it had taken
+  0.92 in overnight, and also said half an inch means a trail is not in
+  shape to ride. Both can be true: it rode well *and* people should have
+  stayed off. The score cannot hold both, so this field holds the second.
+- **`section`** — optional free text. Big areas ride differently end to
+  end and one score per area is the model's coarsest assumption.
+
+`rating-test.mjs` drives the real widget in a browser and asserts the
+payload. The rating form is the only place ground truth enters this
+project; a silent break costs data nobody can recover, because you
+cannot go back and re-ride last Tuesday.
 
 ### Working from a ratings CSV
 
