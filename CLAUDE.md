@@ -986,3 +986,49 @@ After regenerating, verify the file contains **zero** `{{` and no `%}` outside t
 ## Report honestly
 
 If a deploy fails, say what failed and what you saw. If a calibration sample is too small to justify a change, say so and change nothing. If you're unsure whether something worked, fetch the live URL and look — don't infer success from an exit code.
+
+---
+
+## Before you start: check that you can ship
+
+Run `git push --dry-run origin main` before writing anything. If it fails
+saying the repo is not in the authorized repository set for this session, stop
+and tell Matt before doing the work.
+
+Cloud sessions get read access to this repo by default, and write access only
+when it is listed in the sources for that session. A session can therefore
+clone, edit, and pass every test while being unable to ship a single line. On
+5 Aug 2026 this cost most of a morning: the soil corrections were written,
+tested and committed locally before anyone discovered the push was blocked.
+
+Do not infer write access from an earlier session having had it. The container
+is reclaimed after idle time and rebuilt under the same session name. The 01:05
+session that morning pushed fine; the 11:00 session, same session id, could
+only read.
+
+## Never read a card before its measured data lands
+
+Cards paint twice: forecast first, then measured once `/soil` arrives, and the
+numbers move hard. Bent Creek showed a 72h total of 0.04" and 94 hero dirt on
+first paint, then 0.93" and 87 good seconds later. Wait for the `rain` or
+`rain·2` row to appear under "why this number" before concluding anything. On
+5 Aug this caused a correct 0.92" gauge reading to be retracted and then
+un-retracted an hour later.
+
+## If push is blocked, do not reach for the GitHub web uploader
+
+Prefer a new task with the repo as a source. The uploader does not replace an
+existing file — it lands silently as `index_1.html` beside the real one while
+the page keeps serving the old version. Renaming onto an existing path is then
+refused outright, so the repair is delete-then-rename and the site 404s in
+between. This happened on 5 Aug and took four extra commits to unpick. Note
+also that GitHub's editor is CodeMirror: automated typing into it is
+unreliable, so do not try to paste a large file through the web editor.
+
+## Writing to Matt
+
+He owns the shop and rides these trails; he is not a coder. Keep it short and
+in plain language. When something needs doing on his end, give numbered steps
+with exact paths and links, one action per step, and lead with the answer.
+Long technical prose costs him a re-read and a round trip, so it is worse than
+useless even when every word is correct.
