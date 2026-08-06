@@ -657,6 +657,16 @@ window.ALTAR_SETTINGS = {
      always holds the latest data for that trail. */
   var MODEL_RAWS = {};
 
+  /* True once the measured layer (alerts, creeks, and the /soil payload
+     carrying station soil and rain gauges) has settled and any affected
+     card has been rebuilt. Cards paint from forecast first and the
+     numbers move hard — Bent Creek has read 94 on forecast and 87 on
+     measured seconds later — so anything reading scores off this page
+     programmatically must wait for this. `hasSoil` is NOT that signal:
+     it only says Open-Meteo returned a soil-moisture array, which is
+     true on the very first paint. */
+  var MEASURED_IN = false;
+
   function buildModel(t, data) {
     MODEL_RAWS[t.name] = data;
     var h = data.hourly, times = h.time;
@@ -1742,8 +1752,9 @@ window.ALTAR_SETTINGS = {
           renderVerdict();
         }
         applyExtra();
+        MEASURED_IN = true;
       })
-      .catch(function () {});
+      .catch(function () { MEASURED_IN = true; });
 
     var cached = force ? null : readCache();
     if (cached && cached.raw) {
@@ -2173,6 +2184,22 @@ window.ALTAR_SETTINGS = {
     /* Trail names whose data has landed. Away trails stay absent until
        someone asks for them. */
     loaded: function () { return Object.keys(MODEL_RAWS); },
+
+    /* Has the measured layer landed? Read nothing off this page before
+       it is true — see MEASURED_IN above. */
+    measuredIn: function () { return MEASURED_IN; },
+
+    /* What the measured layer actually brought back. MEASURED_IN goes
+       true even when /soil is down, because waiting forever is worse
+       than degrading — so check this before calling a reading
+       "measured". All zeroes means the scores are forecast-only. */
+    sources: function () {
+      return {
+        wx: EXTRA.wx ? EXTRA.wx.length : 0,
+        stations: EXTRA.stations ? EXTRA.stations.length : 0,
+        coco: EXTRA.coco ? EXTRA.coco.length : 0
+      };
+    },
 
     /* Pull the out-of-state cards in, same as clicking the button. */
     loadAway: function () {
