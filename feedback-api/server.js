@@ -312,7 +312,15 @@ function harvest(node, ctxId, out) {
 async function cloudsJson(url) {
   const r = await fetch(url, { headers: { "User-Agent": "AltarCycles-TrailConditions" } });
   const text = await r.text();
-  if (!r.ok) throw new Error("CLOUDS " + r.status);
+  if (!r.ok) {
+    /* Keep a scrubbed snippet of the body. "CLOUDS 400" alone cannot
+       distinguish an over-quota account from a malformed query — which is
+       exactly the question the 5-6 Aug 2026 outage left open for hours.
+       The key never appears: any echo of it is replaced before logging. */
+    const hint = String(text).replace(/\s+/g, " ")
+      .split(CLOUDS_HASH).join("<hash>").slice(0, 90);
+    throw new Error("CLOUDS " + r.status + (hint ? " — " + hint : ""));
+  }
   try { return JSON.parse(text); }
   catch (e) { throw new Error("CLOUDS returned non-JSON (" + text.slice(0, 80) + ")"); }
 }
@@ -389,7 +397,7 @@ async function wxSeries(dropped) {
         loc: loc, var: WX_VARS.join(","),
         start: "-3 days", end: "now", int: "1 hour", obtype: "H"
       }));
-    } catch (e) { if (dropped) dropped.push("query:" + loc.split(";")[0] + ":" + String(e.message || e).slice(0, 44)); continue; }
+    } catch (e) { if (dropped) dropped.push("query:" + loc.split(";")[0] + ":" + String(e.message || e).slice(0, 120)); continue; }
     const data = j.data || {};
     const meta = await stationMeta(loc, WX_VARS.join(","));
     for (const id of Object.keys(data)) {
@@ -753,7 +761,7 @@ async function soilHarvest() {
       /* Keep the upstream reason. "query:type=ECONET" alone cannot tell
          a quota rejection from a timeout, and the 5-6 Aug outage was
          undiagnosable from the payload for exactly that reason. */
-      dropped.push("query:" + loc.split(";")[0] + ":" + String(e.message || e).slice(0, 44));
+      dropped.push("query:" + loc.split(";")[0] + ":" + String(e.message || e).slice(0, 120));
     }
   }
 
