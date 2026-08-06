@@ -8,7 +8,7 @@ Put this file in the project folder root as `CLAUDE.md` and it loads automatical
 
 ## What this project is
 
-A single static HTML page that scores mountain bike trail rideability from weather data. It reads Open-Meteo (soil moisture at 0–1cm and 3–9cm, soil temperature at 6cm, hourly rain, sun, wind, humidity — three days back, six forward), runs a scoring model in the browser, and shows a per-hour condition strip for ten riding areas around western NC (eight local, two out-of-state behind the "Worth the drive" button).
+A single static HTML page that scores mountain bike trail rideability from weather data. It reads Open-Meteo (soil moisture at 0–1cm and 3–9cm, soil temperature at 6cm, hourly rain, sun, wind, humidity — three days back, six forward), runs a scoring model in the browser, and shows a per-hour condition strip for twenty-one riding areas around western NC (seventeen local, four out-of-state behind the "Worth the drive" button — count updated 6 Aug 2026 when nine of Matt's new spots shipped).
 
 **`index.html` is the entire application.** No build step, no package manager, no dependencies except Google Fonts over CDN. Do not introduce any. If you find yourself wanting npm, stop and ask.
 
@@ -266,13 +266,15 @@ naturally, no pin needed.
 
 Never guess a coordinate. Look it up and say where you got it.
 
-### New spots — soil and exposure in hand, waiting on coordinates
+### New spots — eleven shipped 6 Aug 2026, three still need Matt's pin
 
 Matt named 14 additions on 4 Aug and gave soil and exposure for all of
-them on **6 Aug 2026**. None are in `TRAILS` yet, and the blocker is no
-longer him: it is coordinates. Every one needs a point that sits where
-people actually ride, plus its NWS `zone` and `czone` from
-`api.weather.gov/points/<lat>,<lon>`. **Never guess a coordinate.**
+them on 6 Aug. **Eleven shipped to `TRAILS` the same day** with researched
+coordinates (source cited in each entry's comment) and zones resolved from
+`api.weather.gov/points`. Still waiting on a riding-area pin from Matt —
+no trustworthy public coordinate exists: **Stony Fork Park** (Candler),
+**Bent Creek Gap** (he has a Plus Code), **Beacon Park** (Swannanoa).
+**Never guess a coordinate.**
 
 Matt's values, 6 Aug 2026:
 
@@ -538,11 +540,13 @@ Matt exports the `reports` tab from the calibration sheet. Columns include `verd
 - **`verdict` is the direction the score should move.** `+1` = the page scored it too low, it rode better. `-1` = scored too high, it rode worse. `0` = about right.
 - **Filter to `known_crew = yes`.** The endpoint is public; unlisted names are untrusted.
 - **Respect `when` on pre-v4 rows only.** Since v4 (5 Aug 2026) the row's model snapshot is already taken at the hour the rider says they rode (`rode_at` via `stateAt()`), so v4 rows need no re-matching. Rows filed BEFORE v4 snapshot the hour the page was open — for those, a `yesterday` rating must be matched against yesterday's model state or dropped.
-- **Group by soil class, not by trail.** Of the ten areas, after Matt's
-  6 Aug 2026 pass: three `clayrock` (Pisgah Lower, Pisgah Upper,
-  Windrock), two `clay` (Bent Creek, Kanuga), two `blend` (North Mills,
-  Hatley Pointe), one `loam` (Snowshoe), one `sandy` (DuPont), one
-  `rocky` (Wilson Creek).
+- **Group by soil class, not by trail.** After the 6 Aug 2026 additions
+  (twenty-one areas): seven `clayrock` (Pisgah Lower, Pisgah Upper,
+  Windrock, Berm Park, Sugar Mountain, Beech Mountain, WildSide), three
+  `clay` (Bent Creek, Kanuga, Ride Rock Creek), three `blend` (North
+  Mills, Hatley Pointe, Old Fort), five `loam` (Snowshoe, Big Ivy, Mills
+  River Valley Overlook, Green River Game Lands, Mt Mitchell), one
+  `sandy` (DuPont), two `rocky` (Wilson Creek, Jarrod's Place).
 - **`sandy` has exactly one trail and has never been validated.** DuPont
   moved to it on 6 Aug and is the only card feeding that pool, so its
   0.70 / 1.30 constants will be the last to get evidence. It is also the
