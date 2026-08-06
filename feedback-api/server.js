@@ -193,9 +193,22 @@ const CLOUDS_COCO_LOC = process.env.CLOUDS_COCO_LOC ||
   "type=COCORAHS;county=Henderson County,Madison County,Buncombe County," +
   "McDowell County,Yancey County,Caldwell County";
 
-const SOIL_TTL = 20 * 60 * 1000;   // both networks publish hourly
+/* Both networks publish hourly, so polling faster than hourly buys
+   nothing — and CLOUDS quota is the binding constraint: the public tier
+   allows 2,000 requests/month and this service fires six per refresh.
+   At the old 20-minute TTL that is ~13,000/month, which is the likely
+   cause of the 5-6 Aug 2026 outage where every query dropped for hours.
+   60 minutes = ~4,300/month. Still over if traffic is steady — the real
+   fix is a higher CLOUDS tier (email NCSCO), but this triples headroom. */
+const SOIL_TTL = 60 * 60 * 1000;
+/* How long to sit on a FAILED harvest before trying upstream again.
+   Long enough not to hammer a struggling API, short enough that the
+   page is not stuck with a bad payload for a full hour. */
+const SOIL_FAIL_TTL = 5 * 60 * 1000;
 
-let soilCache = { at: 0, payload: null };
+let soilCache = { at: 0, ttl: 0, payload: null };
+let soilGood = null;       /* last harvest that actually carried data */
+let soilInflight = null;   /* single-flight: concurrent misses share one harvest */
 let metaCache = {};   // keyed by loc
 
 function cloudsUrl(extra) {
@@ -340,7 +353,17 @@ async function stationMeta(loc, vars) {
   const out = {};
   try {
     harvest(await cloudsJson(cloudsUrl({ type: "meta", loc: loc, var: vars })), null, out);
-  } catch (e) { /* coordinates are optional */ }
+  } catch (e) {
+    /* One failed metadata call used to cache an EMPTY coordinate map for
+       24 hours, which dropped every gauge in the network as ":nocoords"
+       for a day. Coordinates change ~never: on failure, serve the old
+       map if we have one and leave the cache alone so the next call
+       retries upstream. */
+    if (hit) return hit.byId;
+  }
+  /* Same guard for a 200 that harvests nothing: never replace a
+     populated map with an empty one. */
+  if (!Object.keys(out).length && hit && Object.keys(hit.byId).length) return hit.byId;
   metaCache[loc] = { at: Date.now(), byId: out };
   return out;
 }
@@ -366,7 +389,7 @@ async function wxSeries(dropped) {
         loc: loc, var: WX_VARS.join(","),
         start: "-3 days", end: "now", int: "1 hour", obtype: "H"
       }));
-    } catch (e) { if (dropped) dropped.push("query:" + loc.split(";")[0]); continue; }
+    } catch (e) { if (dropped) dropped.push("query:" + loc.split(";")[0] + ":" + String(e.message || e).slice(0, 44)); continue; }
     const data = j.data || {};
     const meta = await stationMeta(loc, WX_VARS.join(","));
     for (const id of Object.keys(data)) {
@@ -379,7 +402,16 @@ async function wxSeries(dropped) {
         const rec = byTime[t];
         if (!rec || typeof rec !== "object") continue;
         const p = numOf(unwrap(rec.precip));
-        const et = numOf(unwrap(rec.evaptrans_pm));
+        /* CLOUDS serves Penman-Monteith ET in MILLIMETERS while precip
+           on the same feed is inches (verified against forecasts and a
+           hand-read gauge on 5 Aug 2026). Unconverted, FLET showed
+           "4.15 in evaporated in 24h" — impossible in inches, ordinary
+           in mm. Convert here so the card and the ratings CSV both get
+           inches. If a station ever really does report inches this
+           makes it read 25x low, which is visible; the reverse error
+           read 25x high for a month and looked like a broken sensor. */
+        const etRaw = numOf(unwrap(rec.evaptrans_pm));
+        const et = etRaw === null ? null : etRaw / 25.4;
         if (p === null && et === null) continue;
         /* key by local hour so it lines up with Open-Meteo's timestamps */
         const s = String(t);
@@ -416,7 +448,12 @@ async function cocoMeta() {
       if (lat == null || lon == null) continue;
       byId[id] = { name: g("name"), lat: lat, lon: lon, elev: numOf(g("elev")) };
     }
-  } catch (e) { /* metadata is optional; observers without coords are counted below */ }
+  } catch (e) {
+    /* Same rule as stationMeta: a failed meta call must not cache an
+       empty map over a good one for 24 hours. */
+    if (cocoMetaCache.byId && Object.keys(cocoMetaCache.byId).length) return cocoMetaCache.byId;
+  }
+  if (!Object.keys(byId).length && cocoMetaCache.byId && Object.keys(cocoMetaCache.byId).length) return cocoMetaCache.byId;
   cocoMetaCache = { at: Date.now(), byId: byId };
   return byId;
 }
@@ -692,8 +729,18 @@ function gradeSummary() {
 }
 
 async function soilPayload() {
-  if (soilCache.payload && Date.now() - soilCache.at < SOIL_TTL) return soilCache.payload;
+  if (soilCache.payload && Date.now() - soilCache.at < soilCache.ttl) return soilCache.payload;
   if (!CLOUDS_HASH) return { stations: [], wx: [], coco: [], note: "CLOUDS_HASH not set" };
+  /* Single flight. Without this, every request that lands on an expired
+     cache fires its own six-query CLOUDS burst — under load that
+     multiplies quota burn by the number of concurrent visitors, at the
+     exact moment (TTL boundary) they pile up. */
+  if (soilInflight) return soilInflight;
+  soilInflight = soilHarvest().finally(function () { soilInflight = null; });
+  return soilInflight;
+}
+
+async function soilHarvest() {
 
   /* One network per query, same as the rain feed: USCRN being slow
      should not take ECONet's readings down with it. */
@@ -702,7 +749,12 @@ async function soilPayload() {
     try {
       harvest(await cloudsJson(cloudsUrl({ loc: loc, var: SOIL_VARS.join(","), data_limit: "last" })), null, data);
       Object.assign(meta, await stationMeta(loc, SOIL_VARS.join(",")));
-    } catch (e) { dropped.push("query:" + loc.split(";")[0]); }
+    } catch (e) {
+      /* Keep the upstream reason. "query:type=ECONET" alone cannot tell
+         a quota rejection from a timeout, and the 5-6 Aug outage was
+         undiagnosable from the payload for exactly that reason. */
+      dropped.push("query:" + loc.split(";")[0] + ":" + String(e.message || e).slice(0, 44));
+    }
   }
 
   /* Staleness is a question about the CLOCK, not about the value.
@@ -774,7 +826,36 @@ async function soilPayload() {
   /* Named, not silent: a stuck probe is a thing to go fix or report to
      the network, not just something to hide from the page. */
   if (stale.length) payload.stale = stale;
-  soilCache = { at: Date.now(), payload: payload };
+
+  /* Cache policy. On 5 Aug 2026 a harvest where every query dropped
+     produced {stations:0, wx:0, coco:0} — and it was cached over the
+     last good payload and served to every visitor for 20 minutes.
+     An empty harvest is a fact about UPSTREAM, not about the weather:
+     keep serving the last good data, say it is degraded, and retry
+     upstream on the short TTL rather than the long one. */
+  const empty = !stations.length && !wx.length && !coco.length;
+  if (!empty) {
+    soilGood = payload;
+    soilCache = { at: Date.now(), ttl: SOIL_TTL, payload: payload };
+    return payload;
+  }
+  if (soilGood) {
+    const out = {
+      stations: soilGood.stations, wx: soilGood.wx, coco: soilGood.coco,
+      fetched: soilGood.fetched,
+      /* the page footer keys on `dropped`, so a stale serve is visibly
+         degraded rather than silently old */
+      dropped: (dropped.length ? dropped : []).concat(
+        ["serving last good payload from " + soilGood.fetched]),
+      degraded: true, refetched: payload.fetched
+    };
+    if (soilGood.stale) out.stale = soilGood.stale;
+    soilCache = { at: Date.now(), ttl: SOIL_FAIL_TTL, payload: out };
+    return out;
+  }
+  /* Nothing good to fall back on (cold start into a broken upstream):
+     serve the empty payload but only briefly. */
+  soilCache = { at: Date.now(), ttl: SOIL_FAIL_TTL, payload: payload };
   return payload;
 }
 
@@ -820,7 +901,10 @@ const server = http.createServer(function (req, res) {
   if (req.method === "GET" && url.pathname === "/soil") {
     soilPayload()
       .then(function (p) {
-        res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "public, max-age=600" });
+        /* max-age was 600: the page's Refresh button could not actually
+           re-fetch for 10 minutes because the browser served its own
+           copy. 60s still absorbs reload-spam without hiding a recovery. */
+        res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "public, max-age=60" });
         res.end(JSON.stringify(p));
       })
       .catch(function (e) {
