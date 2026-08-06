@@ -9,12 +9,12 @@
 :root{
   --ink:#111111; --ash:#CCCCCC; --rust:#B85C2A;
   --earth:#4A3728; --shadow:#2C4A5A; --line:#3A2C22;
-  --dim:#8C7D70;
+  --dim:#8C7D70; --moss:#7A8A3E;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--ink);color:var(--ash);font-family:Lora,Georgia,serif;
      line-height:1.7;padding:28px 20px 80px}
-.wrap{max-width:1000px;margin:0 auto}
+.wrap{max-width:1060px;margin:0 auto}
 h1,h2,h3{font-family:"Big Shoulders Display",Impact,sans-serif;font-weight:900;
      text-transform:uppercase;letter-spacing:.02em;line-height:1.05;margin:0}
 h1{font-size:clamp(30px,5.5vw,46px);border-bottom:2px solid var(--rust);padding-bottom:14px;margin-bottom:8px}
@@ -24,7 +24,7 @@ p{margin:10px 0}
 .lede{color:var(--dim);font-style:italic;margin-bottom:4px}
 code,.num{font-family:"Space Mono",monospace}
 table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
-th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
 th{font-family:"Space Mono",monospace;font-size:11px;text-transform:uppercase;
    letter-spacing:.08em;color:var(--dim);font-weight:700}
 tbody tr:hover{background:rgba(74,55,40,.25)}
@@ -32,40 +32,53 @@ select{font-family:"Space Mono",monospace;font-size:13px;background:#1a1512;colo
    border:1px solid var(--line);padding:5px 7px;border-radius:2px;cursor:pointer}
 select:focus{outline:2px solid var(--rust);outline-offset:1px}
 select.unset{border-color:var(--rust);color:var(--rust)}
-.sc{font-family:"Space Mono",monospace;font-weight:700;font-size:16px;display:inline-block;min-width:2.6em}
+select.changed{border-color:var(--moss);color:var(--moss)}
+.sc{font-family:"Space Mono",monospace;font-weight:700;font-size:16px;display:inline-block;min-width:2.4em}
+.band{font-family:"Space Mono",monospace;font-size:11px;text-transform:uppercase;
+   letter-spacing:.06em;color:var(--dim);display:block}
+.rec{font-family:"Space Mono",monospace;font-size:12px;color:var(--dim);display:block;margin-top:2px}
 .delta{font-family:"Space Mono",monospace;font-size:12px;color:var(--dim);margin-left:6px}
 .down{color:var(--rust)}
-.up{color:#7A8A3E}
-.band{font-family:"Space Mono",monospace;font-size:11px;text-transform:uppercase;
-   letter-spacing:.06em;color:var(--dim)}
+.up{color:var(--moss)}
+.ladder{font-family:"Space Mono",monospace;font-size:12px;line-height:1.9;white-space:nowrap}
+.ladder .on{color:var(--ash);font-weight:700}
+.ladder .off{color:var(--dim)}
+.ladder b{display:inline-block;min-width:4.6em;font-weight:400}
 .note{border-left:2px solid var(--earth);padding:2px 0 2px 16px;margin:18px 0;color:var(--dim)}
 .warn{border-left-color:var(--rust)}
+.ok{border-left-color:var(--moss)}
 button{font-family:"Space Mono",monospace;font-size:13px;background:transparent;color:var(--ash);
    border:1px solid var(--line);padding:11px 16px;cursor:pointer;letter-spacing:.04em}
 button:hover{border-color:var(--rust);color:var(--rust)}
-#out{width:100%;min-height:200px;background:#0c0a09;color:var(--ash);border:1px solid var(--line);
+#out{width:100%;min-height:220px;background:#0c0a09;color:var(--ash);border:1px solid var(--line);
    font-family:"Space Mono",monospace;font-size:12px;padding:12px;margin-top:12px;line-height:1.6}
 .pend td:first-child{color:var(--rust)}
 .foot{margin-top:50px;padding-top:18px;border-top:1px solid var(--line);color:var(--dim);font-size:13px}
+#status{font-family:"Space Mono",monospace;font-size:12px;color:var(--rust);
+   border:1px solid var(--line);padding:10px 14px;margin:16px 0}
+#status.done{color:var(--moss)}
+#probe{position:fixed;left:-99999px;top:0;width:1200px;height:3200px;border:0}
 </style>
 </head>
 <body>
 <div class="wrap">
 
 <h1>Soil &amp; Exposure Review</h1>
-<p class="lede">Soil is now Matt's, not mine. Exposure is still every bit a guess — that's what this sheet is for.</p>
+<p class="lede">Soil is now Matt's. Exposure is still every bit a guess — that's what this sheet is for.</p>
 
-<div class="note warn">
-<p><strong>Soil: corrected 5 Aug 2026.</strong> Seven of the ten spots had been labelled <code>rocky</code>, which carries a wetness multiplier of <code>0.55</code> — it halved every rain penalty. Matt's read: Bent Creek, DuPont and Windrock are clay; Pisgah Lower is clay with heavy rock; North Mills and Pisgah Upper are brown dirt, clay and rock together; Hatley Pointe is loam and soft dirt because the trail is still new. Only Wilson Creek is actually <code>rocky</code>. Two in-between grades were added to hold the blends: <code>clayrock</code> and <code>blend</code>.</p>
-<p>The cost of that one wrong guess, measured: Bent Creek drops from <span class="num">87</span> to about <span class="num">68</span> and Pisgah Lower from <span class="num">69</span> to about <span class="num">41</span> on the same weather. The page had been reading two-to-three condition bands too optimistic on clay after rain.</p>
+<div id="status">Loading the live page and waiting for measured data…</div>
+
+<div class="note ok">
+<p><strong>This sheet is live.</strong> It loads the real trail page in the background and calls the real scoring model, so every number below is today's, not a snapshot someone pasted in. Nothing to regenerate — reload it and it is current. The catch is the same one the page has: <em>wait for it to finish</em>. Cards paint from forecast first and measured data seconds later, and the numbers move hard. The status bar above turns green when the measured payload has landed.</p>
 </div>
 
 <div class="note warn">
-<p><strong>Exposure is still unverified.</strong> Every <code>exposure</code> value below is mine, including <code>mixed</code> for the Pisgah&nbsp;— Upper ridgeline, which is a straight guess about a place I have never been. Exposure multiplies drying by 0.70 / 1.00 / 1.35, so it moves scores about as hard as soil does. This is the column to go after next.</p>
+<p><strong>Exposure moves the score less than I used to claim — but it moves the timing a lot.</strong> This sheet and <code>CLAUDE.md</code> both used to say exposure hit about as hard as soil. Measured against live data on the evening of 5 Aug 2026, that was wrong. Swinging a trail all the way from <code>shaded</code> to <code>exposed</code> moved today's score by 0–14 points depending on the trail, where the soil relabel had moved Bent Creek 19 points and Pisgah Lower 28.</p>
+<p>What it does move is <strong>when a trail comes back</strong>. On the same run, Pisgah Lower came good <span class="num">26 hours</span> earlier as <code>exposed</code> than as <code>shaded</code>; Pisgah Upper 21 hours; Bent Creek recovered inside the forecast window as <code>exposed</code> and never as <code>shaded</code>. That follows from the mechanics — exposure scales the drying <em>rate</em>, so it needs dry hours to compound and does almost nothing to a score taken while it is still raining. Watch the "comes good" line, not just the number.</p>
 </div>
 
 <div class="note warn">
-<p><strong>Read this sheet's numbers as a ceiling, not a measurement.</strong> The scores in the table are the measured pre-relabel penalties rescaled arithmetically to the new soil classes. The rescale is exact for this hour's penalty but does not re-run the drying curve backwards, and clay sheds water at 0.75 where rocky shed at 1.40 — so the real numbers land somewhat lower still. Regenerate this sheet from the live cards once the change is deployed.</p>
+<p><strong>Out-of-state spots load on request.</strong> Windrock and Snowshoe sit behind the page's "Worth the drive" button so the page stays quick. This sheet clicks it for you, but they arrive later than the rest — if they read "not loaded", give it a few more seconds.</p>
 </div>
 
 <h2>What the numbers do</h2>
@@ -73,7 +86,9 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 <thead><tr><th>Soil</th><th>wet — how hard water hurts</th><th>dry — how fast it sheds</th><th>Effect</th></tr></thead>
 <tbody>
 <tr><td><code>clay</code></td><td class="num">1.30</td><td class="num">0.75</td><td>Punished hardest, recovers slowest</td></tr>
+<tr><td><code>clayrock</code></td><td class="num">1.05</td><td class="num">0.98</td><td>Clay with heavy rock through it</td></tr>
 <tr><td><code>loam</code></td><td class="num">1.00</td><td class="num">1.00</td><td>The baseline</td></tr>
+<tr><td><code>blend</code></td><td class="num">0.95</td><td class="num">1.05</td><td>Brown dirt, clay and rock together</td></tr>
 <tr><td><code>sandy</code></td><td class="num">0.70</td><td class="num">1.30</td><td>Sheds well, dries fast</td></tr>
 <tr><td><code>rocky</code></td><td class="num">0.55</td><td class="num">1.40</td><td>Most forgiving of rain by a wide margin</td></tr>
 </tbody>
@@ -87,19 +102,26 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 </tbody>
 </table>
 
-<h2>Current spots — change and see today's effect</h2>
-<p>Scores are today's real model state (5 Aug 2026). Change a dropdown and the score recomputes.</p>
+<h2>Current spots</h2>
+<p>The three-way ladder shows what each exposure setting would do to this spot <em>right now</em>, run through the real model. Change a dropdown to record a correction; the "your pick" number updates with it.</p>
 <table id="live">
-<thead><tr><th>Spot</th><th>Soil</th><th>Exposure</th><th>Today</th><th>Would be</th></tr></thead>
+<thead><tr>
+  <th style="width:19%">Spot</th>
+  <th style="width:15%">Soil</th>
+  <th style="width:15%">Exposure</th>
+  <th style="width:14%">As it stands</th>
+  <th style="width:22%">Exposure ladder — score &amp; comes good</th>
+  <th style="width:15%">Your pick</th>
+</tr></thead>
 <tbody></tbody>
 </table>
 
 <div class="note">
-<p><strong>What this recompute does and doesn't do.</strong> It rescales today's two wetness penalties by the new multipliers, which is exact for this hour. It does <em>not</em> re-run the drying curve backwards — changing <code>dry</code> also changes how much water was left by now, so a real change would shift the number a little further in the same direction. Treat "would be" as the floor of the effect, not the whole of it.</p>
+<p><strong>Reading "comes good".</strong> It is the first hour the model expects the spot back above the soft line, taken from the forecast ahead. A dash means it does not get there inside the window the page can see — which on a wet week means "not for a while", not "never".</p>
 </div>
 
-<h2>The fifteen new spots</h2>
-<p>Not on the page yet — they need these two values from you. Creek gauges are already scouted for each.</p>
+<h2>The new spots</h2>
+<p>Fourteen areas named but not on the page yet — they need both values from you. Creek gauges are already scouted for most.</p>
 <table id="pending">
 <thead><tr><th>Spot</th><th>Soil</th><th>Exposure</th><th>Gauge already found</th></tr></thead>
 <tbody></tbody>
@@ -112,152 +134,238 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 
 <div class="foot">
 <p>Score bands: <span class="num">88+</span> hero &middot; <span class="num">72+</span> good &middot; <span class="num">56+</span> soft &middot; below that it reads poor or slop. Only the wetness terms respond to soil and exposure; the active-rain and frozen-ground terms don't.</p>
-<p>Altar Cycles &middot; built from the live model state, 5 Aug 2026.</p>
+<p>Altar Cycles &middot; reads the live model on every load.</p>
 </div>
 
 </div>
+
+<iframe id="probe" src="index.html" title="live model (hidden)"></iframe>
+
 <script>
-var SOIL = { clay:{wet:1.30,dry:0.75}, clayrock:{wet:1.05,dry:0.98}, loam:{wet:1.00,dry:1.00}, blend:{wet:0.95,dry:1.05}, sandy:{wet:0.70,dry:1.30}, rocky:{wet:0.55,dry:1.40} };
-var EXP  = { shaded:0.70, mixed:1.00, exposed:1.35 };
-
-/* Per-trail state read off the live cards at 7:16 AM on 5 Aug 2026, AFTER
-   the measured-gauge payload had landed (the forecast-only first paint reads
-   much drier — see the note above the table).
-
-   IMPORTANT — provenance. `soil` here is Matt's corrected class, shipped to
-   index.html on 5 Aug 2026. But subPen / watPen were MEASURED under the old
-   labels, when seven of these ten were `rocky`. They have been rescaled by
-   wet_new / wet_old, which is exact for the instantaneous penalty and is the
-   same arithmetic the "would be" column does. They were NOT re-measured, and
-   the rescale does not re-run the drying curve backwards — clay dries at 0.75
-   where rocky dried at 1.40, so less water would actually have shed by now and
-   the true penalties run somewhat HIGHER than these. Treat every score below
-   as a ceiling until this sheet is regenerated from live cards post-deploy.
-
-   Unrescaled (soil class unchanged): Ride Kanuga, Wilson Creek, Snowshoe. */
-var TRAILS = [
-  { name:"Bent Creek",        place:"Pisgah NF",        soil:"clay",     exp:"shaded", score:68, subPen:14, watPen:19 },
-  { name:"North Mills River", place:"Trace Ridge",      soil:"blend",    exp:"mixed",  score:100, subPen:0, watPen:0  },
-  { name:"Pisgah — Lower",    place:"Ranger Station",   soil:"clayrock", exp:"shaded", score:41, subPen:11, watPen:48 },
-  { name:"Pisgah — Upper",    place:"Pisgah Inn",       soil:"blend",    exp:"mixed",  score:85, subPen:10, watPen:5  },
-  { name:"DuPont",            place:"Cedar Mountain",   soil:"clay",     exp:"mixed",  score:79, subPen:14, watPen:7  },
-  { name:"Ride Kanuga",       place:"Hendersonville",   soil:"clay",     exp:"mixed",  score:84, subPen:13, watPen:3  },
-  { name:"Wilson Creek",      place:"Collettsville",    soil:"rocky",    exp:"mixed",  score:87, subPen:13, watPen:0  },
-  { name:"Hatley Pointe",     place:"Mars Hill",        soil:"loam",     exp:"shaded", score:66, subPen:15, watPen:0  },
-  { name:"Windrock",          place:"Oliver Springs TN",soil:"clay",     exp:"mixed",  score:null, subPen:0, watPen:0 },
-  { name:"Snowshoe",          place:"Snowshoe WV",      soil:"loam",     exp:"shaded", score:null, subPen:0, watPen:0 }
-];
-
 var PENDING = [
-  ["Big Ivy",                  "Ivy R nr Marshall — 9.2 mi (watershed, not nearest)"],
-  ["Stony Fork Park",          "Hominy Cr — 6.0 mi"],
+  ["Big Ivy",                     "Ivy R nr Marshall — 9.2 mi (watershed, not nearest)"],
+  ["Stony Fork Park",             "Hominy Cr — 6.0 mi"],
   ["Mills River Valley Overlook", "not yet scouted"],
-  ["Bent Creek Gap",           "needs a better Plus Code from you"],
-  ["Green River Game Lands",   "not yet scouted"],
-  ["Berm Park",                "Pigeon R nr Canton — 1.7 mi"],
-  ["Beacon Park",              "not yet scouted"],
-  ["Sugar Mountain",           "Buckeye Cr — 6.4 mi"],
-  ["Beech Mountain",           "Buckeye Cr abv lake — 1.2 mi"],
-  ["Old Fort",                 "Catawba R — 7.8 mi; needs a riding-area coordinate"],
-  ["Mt Mitchell",              "South Toe R nr Celo — 6.5 mi"],
-  ["Ride Rock Creek",          "Big Falls Cr nr Tigerville SC — 3.9 mi"],
-  ["WildSide Bike Park",       "W Prong Little Pigeon — 6.3 mi"],
-  ["Jarrod's Place",           "Chattooga R at Summerville — 1.1 mi"]
+  ["Bent Creek Gap",              "needs a better Plus Code from you"],
+  ["Green River Game Lands",      "not yet scouted"],
+  ["Berm Park",                   "Pigeon R nr Canton — 1.7 mi"],
+  ["Beacon Park",                 "not yet scouted"],
+  ["Sugar Mountain",              "Buckeye Cr — 6.4 mi"],
+  ["Beech Mountain",              "Buckeye Cr abv lake — 1.2 mi"],
+  ["Old Fort",                    "Catawba R — 7.8 mi; needs a riding-area coordinate"],
+  ["Mt Mitchell",                 "South Toe R nr Celo — 6.5 mi"],
+  ["Ride Rock Creek",             "Big Falls Cr nr Tigerville SC — 3.9 mi"],
+  ["WildSide Bike Park",          "W Prong Little Pigeon — 6.3 mi"],
+  ["Jarrod's Place",              "Chattooga R at Summerville — 1.1 mi"]
 ];
 
-function band(s){
-  if (s === null) return "";
+var EXPS = ["shaded", "mixed", "exposed"];
+var SOILKEYS = ["clay", "clayrock", "loam", "blend", "sandy", "rocky"];
+
+var statusEl = document.getElementById("status");
+var liveBody = document.querySelector("#live tbody");
+var pendBody = document.querySelector("#pending tbody");
+var probe = document.getElementById("probe");
+
+var picks = {};   /* name -> {soil, exp} */
+var TRAILS = [];
+
+function band(s) {
+  if (s === null || s === undefined) return "";
   if (s >= 88) return "hero";
   if (s >= 72) return "good";
   if (s >= 56) return "soft";
   if (s >= 40) return "poor";
   return "slop";
 }
-function sel(opts, val, cls){
-  var h = '<select class="' + (cls||"") + '">';
+
+/* "2026-08-07T12:00" -> "Fri 12p". Same clock the page runs on, so no
+   timezone maths — the string is already local to the trail. */
+function whenLabel(iso) {
+  if (!iso) return "—";
+  var d = new Date(iso);
+  if (isNaN(d)) return "—";
+  var days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  var h = d.getHours();
+  var ap = h < 12 ? "a" : "p";
+  var hh = h % 12 === 0 ? 12 : h % 12;
+  var today = new Date();
+  var sameDay = d.toDateString() === today.toDateString();
+  return (sameDay ? "today" : days[d.getDay()]) + " " + hh + ap;
+}
+
+function sel(opts, val, cls) {
+  var h = '<select class="' + (cls || "") + '">';
   if (!val) h += '<option value="">— pick —</option>';
-  opts.forEach(function(o){
+  opts.forEach(function (o) {
     h += '<option value="' + o + '"' + (o === val ? " selected" : "") + ">" + o + "</option>";
   });
   return h + "</select>";
 }
 
-var liveBody = document.querySelector("#live tbody");
-TRAILS.forEach(function(t, i){
-  var tr = document.createElement("tr");
-  tr.innerHTML =
-    "<td><strong>" + t.name + "</strong><br><span class='band'>" + t.place + "</span></td>" +
-    "<td>" + sel(Object.keys(SOIL), t.soil) + "</td>" +
-    "<td>" + sel(Object.keys(EXP), t.exp) + "</td>" +
-    "<td><span class='sc'>" + (t.score === null ? "—" : t.score) + "</span>" +
-      "<span class='band'>" + band(t.score) + "</span></td>" +
-    "<td class='res'>—</td>";
-  liveBody.appendChild(tr);
-  tr.querySelectorAll("select").forEach(function(s){
-    s.addEventListener("change", function(){ recompute(i, tr); });
-  });
-});
-
-function recompute(i, tr){
-  var t = TRAILS[i];
-  var ss = tr.querySelectorAll("select");
-  var soil = ss[0].value, exp = ss[1].value;
-  t.pickSoil = soil; t.pickExp = exp;
-  var cell = tr.querySelector(".res");
-  if (t.score === null){ cell.innerHTML = "<span class='band'>not loaded today</span>"; return; }
-  var ratio = SOIL[soil].wet / SOIL[t.soil].wet;
-  var s = Math.max(0, Math.min(100, Math.round(t.score + t.subPen + t.watPen - (t.subPen + t.watPen) * ratio)));
-  var d = s - t.score;
-  var arrow = d === 0 ? "no change" : (d > 0 ? "+" + d : String(d));
-  cell.innerHTML = "<span class='sc'>" + s + "</span><span class='band'>" + band(s) + "</span>" +
-    "<span class='delta " + (d < 0 ? "down" : d > 0 ? "up" : "") + "'>" + arrow + "</span>";
+function api() {
+  try { return probe.contentWindow && probe.contentWindow.ALTAR_MODEL; }
+  catch (e) { return null; }
 }
-TRAILS.forEach(function(t,i){ recompute(i, liveBody.children[i]); });
 
-var pendBody = document.querySelector("#pending tbody");
-PENDING.forEach(function(p){
-  var tr = document.createElement("tr");
-  tr.className = "pend";
-  tr.innerHTML = "<td>" + p[0] + "</td>" +
-    "<td>" + sel(Object.keys(SOIL), "", "unset") + "</td>" +
-    "<td>" + sel(Object.keys(EXP), "", "unset") + "</td>" +
-    "<td><span class='band'>" + p[1] + "</span></td>";
-  pendBody.appendChild(tr);
-  tr.querySelectorAll("select").forEach(function(s){
-    s.addEventListener("change", function(){ s.classList.toggle("unset", !s.value); build(); });
+/* ---------------------------------------------------------------------
+   Wait for the model, then keep re-reading it. The page paints twice —
+   forecast, then measured — so a single read taken too early is exactly
+   the trap this sheet is supposed to help avoid. Poll until every local
+   trail reports measured data, then stop and say so.
+   --------------------------------------------------------------------- */
+var tries = 0;
+var awayAsked = false;
+
+function tick() {
+  tries++;
+  var A = api();
+  if (!A) {
+    if (tries > 60) statusEl.textContent = "Could not reach the live page. Open index.html in this same folder and try again.";
+    else setTimeout(tick, 500);
+    return;
+  }
+  if (!TRAILS.length) { TRAILS = A.TRAILS.slice(); buildRows(A); }
+
+  if (!awayAsked && tries > 6) { awayAsked = true; try { A.loadAway(); } catch (e) {} }
+
+  var local = TRAILS.filter(function (t) { return !t.away; });
+  var ready = local.filter(function (t) { return A.at(t.name); });
+  var measured = ready.filter(function (t) { var r = A.at(t.name); return r && (r.hasSoil || r.rainTier); });
+
+  paint(A);
+
+  if (measured.length >= local.length && tries > 8) {
+    var awayIn = TRAILS.filter(function (t) { return t.away && A.at(t.name); }).length;
+    var awayAll = TRAILS.filter(function (t) { return t.away; }).length;
+    statusEl.className = "done";
+    statusEl.textContent = "Measured data is in for all " + local.length + " local spots"
+      + (awayAll ? " (" + awayIn + " of " + awayAll + " out-of-state)" : "")
+      + ". Numbers below are live as of " + (A.at(local[0].name) || {}).localTime + ".";
+    if (awayIn >= awayAll || tries > 70) return;
+  } else {
+    statusEl.className = "";
+    statusEl.textContent = "Waiting for measured data — " + measured.length + " of " + local.length
+      + " spots in. Don't read the numbers yet.";
+  }
+  if (tries < 90) setTimeout(tick, 1000);
+}
+
+function buildRows(A) {
+  A.TRAILS.forEach(function (t, i) {
+    picks[t.name] = { soil: t.soil, exp: t.exposure };
+    var tr = document.createElement("tr");
+    tr.innerHTML =
+      "<td><strong>" + t.name + "</strong><br><span class='band'>" + t.place + "</span></td>" +
+      "<td>" + sel(SOILKEYS, t.soil) + "</td>" +
+      "<td>" + sel(EXPS, t.exposure) + "</td>" +
+      "<td class='cur'><span class='band'>waiting…</span></td>" +
+      "<td class='lad'></td>" +
+      "<td class='pick'></td>";
+    liveBody.appendChild(tr);
+    var ss = tr.querySelectorAll("select");
+    ss[0].addEventListener("change", function () { picks[t.name].soil = this.value; mark(this, t.soil); paint(api()); });
+    ss[1].addEventListener("change", function () { picks[t.name].exp = this.value; mark(this, t.exposure); paint(api()); });
   });
-});
 
-function build(){
+  PENDING.forEach(function (p) {
+    var tr = document.createElement("tr");
+    tr.className = "pend";
+    tr.innerHTML = "<td>" + p[0] + "</td>" +
+      "<td>" + sel(SOILKEYS, "", "unset") + "</td>" +
+      "<td>" + sel(EXPS, "", "unset") + "</td>" +
+      "<td><span class='band'>" + p[1] + "</span></td>";
+    pendBody.appendChild(tr);
+    tr.querySelectorAll("select").forEach(function (s) {
+      s.addEventListener("change", function () { s.classList.toggle("unset", !s.value); build(); });
+    });
+  });
+}
+
+function mark(el, original) { el.classList.toggle("changed", el.value !== original); }
+
+function cell(r) {
+  if (!r) return "<span class='band'>not loaded</span>";
+  return "<span class='sc'>" + r.score + "</span><span class='band'>" + r.key + "</span>" +
+         "<span class='rec'>good " + whenLabel(r.recovery) + "</span>";
+}
+
+function paint(A) {
+  if (!A) return;
+  A.TRAILS.forEach(function (t, i) {
+    var tr = liveBody.children[i];
+    if (!tr) return;
+    var base = A.at(t.name);
+    tr.querySelector(".cur").innerHTML = cell(base);
+
+    var lad = tr.querySelector(".lad");
+    if (!base) { lad.innerHTML = "<span class='band'>—</span>"; }
+    else {
+      lad.innerHTML = "<div class='ladder'>" + EXPS.map(function (e) {
+        var r = A.at(t.name, picks[t.name].soil, e);
+        var on = (e === picks[t.name].exp);
+        return "<div class='" + (on ? "on" : "off") + "'><b>" + e + "</b> " +
+               (r ? r.score + "  &middot;  " + whenLabel(r.recovery) : "—") + "</div>";
+      }).join("") + "</div>";
+    }
+
+    var pk = tr.querySelector(".pick");
+    var alt = A.at(t.name, picks[t.name].soil, picks[t.name].exp);
+    if (!alt || !base) { pk.innerHTML = "<span class='band'>—</span>"; }
+    else if (picks[t.name].soil === t.soil && picks[t.name].exp === t.exposure) {
+      pk.innerHTML = "<span class='band'>unchanged</span>";
+    } else {
+      var d = alt.score - base.score;
+      var arrow = d === 0 ? "same score" : (d > 0 ? "+" + d : String(d));
+      pk.innerHTML = "<span class='sc'>" + alt.score + "</span><span class='band'>" + alt.key + "</span>" +
+        "<span class='rec'>good " + whenLabel(alt.recovery) + "</span>" +
+        "<span class='delta " + (d < 0 ? "down" : d > 0 ? "up" : "") + "'>" + arrow + "</span>";
+    }
+  });
+  build();
+}
+
+function build() {
+  var A = api();
   var lines = ["SOIL / EXPOSURE — Matt's corrections", ""];
   lines.push("CURRENT SPOTS (only the ones I changed matter):");
-  TRAILS.forEach(function(t, i){
-    var ss = liveBody.children[i].querySelectorAll("select");
-    var a = ss[0].value, b = ss[1].value;
-    var changed = (a !== t.soil || b !== t.exp);
-    lines.push("  " + (changed ? "CHANGE " : "  keep  ") + t.name +
-      ": " + a + " / " + b + (changed ? "   (was " + t.soil + " / " + t.exp + ")" : ""));
+  (A ? A.TRAILS : []).forEach(function (t) {
+    var p = picks[t.name] || {};
+    var changed = (p.soil !== t.soil || p.exp !== t.exposure);
+    var line = "  " + (changed ? "CHANGE " : "  keep  ") + t.name + ": " + p.soil + " / " + p.exp;
+    if (changed) {
+      line += "   (was " + t.soil + " / " + t.exposure + ")";
+      var b = A.at(t.name), a = A.at(t.name, p.soil, p.exp);
+      if (b && a) {
+        line += "   [" + b.score + " -> " + a.score +
+                ", good " + whenLabel(b.recovery) + " -> " + whenLabel(a.recovery) + "]";
+      }
+    }
+    lines.push(line);
   });
   lines.push("");
   lines.push("NEW SPOTS:");
-  PENDING.forEach(function(p, i){
+  PENDING.forEach(function (p, i) {
     var ss = pendBody.children[i].querySelectorAll("select");
     var a = ss[0].value, b = ss[1].value;
     lines.push("  " + p[0] + ": " + (a && b ? a + " / " + b : (a || b ? (a || "?") + " / " + (b || "?") : "— still thinking")));
   });
+  lines.push("");
+  lines.push("Read live from the model at " + (new Date()).toString().slice(0, 24) + ".");
   document.getElementById("out").value = lines.join("\n");
 }
-liveBody.querySelectorAll("select").forEach(function(s){ s.addEventListener("change", build); });
-build();
 
-document.getElementById("copy").addEventListener("click", function(){
+document.getElementById("copy").addEventListener("click", function () {
   var el = document.getElementById("out");
   el.select(); el.setSelectionRange(0, 99999);
   try { document.execCommand("copy"); this.textContent = "Copied — paste it to me"; }
-  catch(e){ this.textContent = "Select the text below and copy"; }
+  catch (e) { this.textContent = "Select the text below and copy"; }
   var b = this;
-  setTimeout(function(){ b.textContent = "Copy the summary"; }, 2600);
+  setTimeout(function () { b.textContent = "Copy the summary"; }, 2600);
 });
+
+build();
+tick();
 </script>
 </body>
 </html>
