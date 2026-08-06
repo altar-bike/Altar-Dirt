@@ -259,19 +259,52 @@ read-only — it copies the trail before changing anything.
 **Resolved 4 Aug 2026:** Pisgah is split into `Pisgah — Lower` (Ranger
 Station, 35.2848,-82.7270 from OSM, pinned FLET, Matt's call on the
 valley) and `Pisgah — Upper` (Pisgah Inn, 35.4029,-82.7538 from OSM,
-BRP mp 408.6). Upper's exposure is `mixed` — **my ridgeline guess, not
-Matt's; ask him.** FRYI (5,320ft) sits 1.3 mi from the Inn and carries
+BRP mp 408.6). Upper's exposure is `mixed` — my ridgeline guess, which
+Matt confirmed on 6 Aug 2026. FRYI (5,320ft) sits 1.3 mi from the Inn and carries
 an hourly rain gauge, so Upper scores from measured high-country rain
 naturally, no pin needed.
 
 Never guess a coordinate. Look it up and say where you got it.
 
-### New spots waiting on Matt (soil + exposure), gauges pre-scouted
+### New spots — soil and exposure in hand, waiting on coordinates
 
-Matt named ~15 additions on 4 Aug and said he'd give soil/exposure per
-spot; none are in `TRAILS` until he does. Creek gauges surveyed 4 Aug
-2026 from the USGS active-IV site inventory (browser query, bBox per
-spot) so each trail lands with its gauge already known:
+Matt named 14 additions on 4 Aug and gave soil and exposure for all of
+them on **6 Aug 2026**. None are in `TRAILS` yet, and the blocker is no
+longer him: it is coordinates. Every one needs a point that sits where
+people actually ride, plus its NWS `zone` and `czone` from
+`api.weather.gov/points/<lat>,<lon>`. **Never guess a coordinate.**
+
+Matt's values, 6 Aug 2026:
+
+| Spot | soil | exposure |
+|---|---|---|
+| Big Ivy | `loam` | `shaded` |
+| Stony Fork Park | `loam` | `shaded` |
+| Mills River Valley Overlook | `loam` | `shaded` |
+| Bent Creek Gap | `blend` | `shaded` |
+| Green River Game Lands | `loam` | `shaded` |
+| Berm Park | `clayrock` | `mixed` |
+| Beacon Park | `clay` | `exposed` |
+| Sugar Mountain | `clayrock` | `exposed` |
+| Beech Mountain | `clayrock` | `exposed` |
+| Old Fort | `blend` | `shaded` |
+| Mt Mitchell | `loam` | `shaded` |
+| Ride Rock Creek | `clay` | `mixed` |
+| WildSide Bike Park | `clayrock` | `mixed` |
+| Jarrod's Place | `rocky` | `exposed` |
+
+These are the first `exposed` trails on the list — the bike parks and
+the ski-resort downhill spots, which is what you would expect. Nothing
+currently deployed is `exposed`, so that multiplier is as untested as
+`sandy`.
+
+Still needed before any of them ship: a riding-area coordinate for all
+fourteen (Old Fort's known point is the town, and Bent Creek Gap needs a
+better Plus Code from Matt), gauges for the four not yet scouted, and
+monthly `med` tables for any new gauge.
+
+Creek gauges surveyed 4 Aug 2026 from the USGS active-IV site inventory
+(browser query, bBox per spot):
 
 | Spot | Best gauge | Dist | Note |
 |---|---|---|---|
@@ -491,15 +524,23 @@ Matt exports the `reports` tab from the calibration sheet. Columns include `verd
 - **`verdict` is the direction the score should move.** `+1` = the page scored it too low, it rode better. `-1` = scored too high, it rode worse. `0` = about right.
 - **Filter to `known_crew = yes`.** The endpoint is public; unlisted names are untrusted.
 - **Respect `when`.** A `yesterday` rating must be matched against yesterday's model state, not the snapshot in the row. Either drop those or handle them explicitly — don't silently treat them as current.
-- **Group by soil class, not by trail.** Of the ten areas: four `clay`
-  (Bent Creek, DuPont, Kanuga, Windrock), two `blend` (North Mills,
-  Pisgah Upper), two `loam` (Hatley Pointe, Snowshoe), one `clayrock`
-  (Pisgah Lower), one `rocky` (Wilson Creek).
-- **Ratings from before 5 Aug 2026 carry the OLD soil label.** The CSV
-  stores the class as it stood when the rating was filed, and seven of
-  the ten areas were mislabelled `rocky` until that date. Group historic
-  rows by trail and re-map to the current class before pooling by soil,
-  or the pools mix two different meanings of `rocky`.
+- **Group by soil class, not by trail.** Of the ten areas, after Matt's
+  6 Aug 2026 pass: three `clayrock` (Pisgah Lower, Pisgah Upper,
+  Windrock), two `clay` (Bent Creek, Kanuga), two `blend` (North Mills,
+  Hatley Pointe), one `loam` (Snowshoe), one `sandy` (DuPont), one
+  `rocky` (Wilson Creek).
+- **`sandy` has exactly one trail and has never been validated.** DuPont
+  moved to it on 6 Aug and is the only card feeding that pool, so its
+  0.70 / 1.30 constants will be the last to get evidence. It is also the
+  largest single correction so far — roughly +20 on the card. If any
+  soil class is going to be wrong, bet on this one.
+- **Soil labels have moved twice. Ratings carry the label of the day
+  they were filed.** Seven of the ten areas were mislabelled `rocky`
+  until 5 Aug 2026; five more changed class or aspect on 6 Aug (North
+  Mills to `shaded`, Pisgah Upper and Windrock to `clayrock`, DuPont to
+  `sandy`, Hatley Pointe to `blend`). Group historic rows by trail and
+  re-map to the current class before pooling by soil, or the pools mix
+  three different meanings of the same word.
 - **Need roughly 30–50 observations per soil class** before moving a multiplier. Below that, report the trend and change nothing. Note that the 5 Aug 2026 relabel split the pool across six classes instead of three, so each class now fills more slowly — `clayrock` and `rocky` have one area each feeding them.
 
 Method: plot verdict against `soil_moisture` and `rain_24h` per soil class, find where the model reads consistently high or low, adjust. **This is a scatter plot and an afternoon. Do not reach for machine learning.** With this sample size a fitted model would be noise with a confidence interval.
