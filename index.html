@@ -641,7 +641,15 @@ window.ALTAR_SETTINGS = {
      aspect scale how hard wet hurts and how fast it recovers.
      =================================================================== */
 
+  /* Every payload buildModel has seen, keyed by trail name. Kept so
+     soil-review.html can re-run this same model at a different soil or
+     exposure without refetching or reimplementing it — see ALTAR_MODEL
+     at the bottom of this file. Overwritten on each repaint, so it
+     always holds the latest data for that trail. */
+  var MODEL_RAWS = {};
+
   function buildModel(t, data) {
+    MODEL_RAWS[t.name] = data;
     var h = data.hourly, times = h.time;
     var soilMult = SOILS[t.soil].wet;
     var dryMult  = SOILS[t.soil].dry * EXPOSURES[t.exposure].dry;
@@ -2138,6 +2146,56 @@ window.ALTAR_SETTINGS = {
 
   refreshBtn.addEventListener("click", function () { loadAll(true); });
   loadAll(false);
+  /* ==================================================================
+     Model access for soil-review.html.
+
+     That sheet exists to collect Matt's soil and exposure corrections,
+     and it is only persuasive if it shows what a change would really
+     do. A second copy of the model over there would drift from this one
+     inside a week, so the sheet loads this page in a hidden same-origin
+     iframe and calls straight into the real thing instead.
+
+     Read-only. `at()` builds a throwaway model from a copy of the trail
+     and changes nothing on the page.
+     ================================================================== */
+  window.ALTAR_MODEL = {
+    TRAILS: TRAILS, SOILS: SOILS, EXPOSURES: EXPOSURES,
+
+    /* Trail names whose data has landed. Away trails stay absent until
+       someone asks for them. */
+    loaded: function () { return Object.keys(MODEL_RAWS); },
+
+    /* Pull the out-of-state cards in, same as clicking the button. */
+    loadAway: function () {
+      var b = document.getElementById("da-away-btn");
+      if (b && !b.disabled) b.click();
+    },
+
+    /* Re-run the model for one trail at a hypothetical soil and/or
+       exposure. Null until that trail's data has landed. */
+    at: function (name, soil, exposure) {
+      var t = null, i, k;
+      for (i = 0; i < TRAILS.length; i++) if (TRAILS[i].name === name) t = TRAILS[i];
+      if (!t) return null;
+      var raw = MODEL_RAWS[name];
+      if (!raw) return null;
+      var alt = {};
+      for (k in t) alt[k] = t[k];
+      if (soil) alt.soil = soil;
+      if (exposure) alt.exposure = exposure;
+      var m = buildModel(alt, raw);
+      return {
+        score: Math.round(m.now.score), key: m.now.key,
+        recovery: m.recovery,
+        hasSoil: m.hasSoil,
+        rainTier: m.rainSource ? m.rainSource.tier : null,
+        p24: m.p24, p72: m.p72, hsr: m.hsr, sm: m.smNow,
+        wetMult: m.wetMult, dryMult: m.dryMult,
+        localTime: m.localTime
+      };
+    }
+  };
+
 })();
 </script>
 
