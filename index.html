@@ -415,7 +415,8 @@ window.ALTAR_SETTINGS = {
   var TRAILS = [
     { name: "Bent Creek",       place: "Pisgah NF, NC",         lat: 35.4919, lon: -82.6285, soil: "clay",     exposure: "shaded",
       zone: "NCZ053", czone: "NCC021", gauge: "0344878100", gaugeMi: 5.1 },
-    { name: "North Mills River", place: "Trace Ridge, NC",       lat: 35.4204, lon: -82.6567, soil: "blend",    exposure: "mixed",
+    /* Trace Ridge reads shaded, not mixed — Matt, 6 Aug 2026. */
+    { name: "North Mills River", place: "Trace Ridge, NC",       lat: 35.4204, lon: -82.6567, soil: "blend",    exposure: "shaded",
       zone: "NCZ065", czone: "NCC089", gauge: "03446000",   gaugeMi: 3.8 },
     /* Pisgah split in two (Matt, 4 Aug 2026): one valley sensor was
        standing in for a 3,000ft spread. Lower anchors on the Ranger
@@ -440,24 +441,32 @@ window.ALTAR_SETTINGS = {
        1.3 mi away, wins naturally, and carries an hourly rain gauge —
        so the high country scores from measured rain at its own
        elevation instead of a valley forecast. Davidson River gauge kept
-       for the drainage, distance shown honestly. Exposure "mixed" is my
-       call for a ridgeline, not Matt's — flag it to him. */
-    { name: "Pisgah — Upper",   place: "Pisgah Inn, NC",         lat: 35.4029, lon: -82.7538, soil: "blend",    exposure: "mixed",
+       for the drainage, distance shown honestly. Exposure "mixed" was my
+       ridgeline guess and Matt confirmed it on 6 Aug 2026; the soil moved
+       from `blend` to `clayrock` in the same pass. */
+    { name: "Pisgah — Upper",   place: "Pisgah Inn, NC",         lat: 35.4029, lon: -82.7538, soil: "clayrock", exposure: "mixed",
       zone: "NCZ064", czone: "NCC175", gauge: "03441000",   gaugeMi: 9.4 },
-    { name: "DuPont",           place: "Cedar Mountain, NC",     lat: 35.1990, lon: -82.6180, soil: "clay",     exposure: "mixed",
+    /* DuPont is sandy, not clay — Matt, 6 Aug 2026. Biggest single
+       correction in this round: it lifts the card about 20 points and
+       takes it out of the "wait for it to come good" state entirely.
+       It is also the only trail on `sandy`, whose 0.70 / 1.30 constants
+       have never been checked against a rating. Treat DuPont as the
+       test case for them. */
+    { name: "DuPont",           place: "Cedar Mountain, NC",     lat: 35.1990, lon: -82.6180, soil: "sandy",    exposure: "mixed",
       zone: "NCZ064", czone: "NCC175", gauge: "03441000",   gaugeMi: 7.1 },
     { name: "Ride Kanuga",      place: "Hendersonville, NC",     lat: 35.2860, lon: -82.5290, soil: "clay",     exposure: "mixed",
       zone: "NCZ065", czone: "NCC089", gauge: "0344632850", gaugeMi: 5.0 },
     { name: "Wilson Creek",     place: "Collettsville, NC",      lat: 35.9590, lon: -81.7613, soil: "rocky",    exposure: "mixed",
       zone: "NCZ501", czone: "NCC027", gauge: "02140510",   gaugeMi: 4.9 },
-    /* Hatley Pointe is loam and soft dirt, not clay — Matt, 5 Aug 2026: the
-       trail is new, so it hasn't packed down yet. Worth revisiting once it
-       has a couple of seasons on it. */
-    { name: "Hatley Pointe",    place: "Mars Hill, NC",          lat: 35.9547, lon: -82.5088, soil: "loam",     exposure: "shaded",
+    /* Hatley Pointe: called loam on 5 Aug 2026 because the trail is new
+       and hasn't packed down; Matt revised it to `blend` on 6 Aug seeing
+       the numbers. Still worth revisiting once it has a couple of
+       seasons on it. */
+    { name: "Hatley Pointe",    place: "Mars Hill, NC",          lat: 35.9547, lon: -82.5088, soil: "blend",    exposure: "shaded",
       zone: "NCZ048", czone: "NCC115", gauge: null,         gaugeMi: 0   },
     /* away: out of state, so not fetched until someone asks. Keeps the
        page quick and keeps us off Open-Meteo for trips nobody's taking. */
-    { name: "Windrock",         place: "Oliver Springs, TN",     lat: 36.0640, lon: -84.3390, soil: "clay",     exposure: "mixed",
+    { name: "Windrock",         place: "Oliver Springs, TN",     lat: 36.0640, lon: -84.3390, soil: "clayrock", exposure: "mixed",
       zone: "TNZ036", czone: "TNC001", gauge: null,         gaugeMi: 0,   away: true },
     { name: "Snowshoe",         place: "Snowshoe, WV",           lat: 38.4120, lon: -79.9960, soil: "loam",     exposure: "shaded",
       zone: "WVZ523", czone: "WVC075", gauge: "03180900",   gaugeMi: 5.7, away: true }
