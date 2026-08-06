@@ -139,7 +139,7 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 
 </div>
 
-<iframe id="probe" src="index.html" title="live model (hidden)"></iframe>
+<iframe id="probe" title="live model (hidden)"></iframe>
 
 <script>
 var PENDING = [
@@ -251,7 +251,7 @@ function tick() {
      on an old index.html that predates the flag. */
   var settled = typeof A.measuredIn === "function"
     ? A.measuredIn()
-    : local.every(function (t) { var r = A.at(t.name); return r && r.rainTier; });
+    : local.some(function (t) { var r = A.at(t.name); return r && r.rainTier; });
 
   paint(A);
 
@@ -408,6 +408,13 @@ document.getElementById("copy").addEventListener("click", function () {
   var b = this;
   setTimeout(function () { b.textContent = "Copy the summary"; }, 2600);
 });
+
+/* Cache-bust the iframe per minute. Without this the browser happily
+   serves a months-old index.html into the frame while the origin has a
+   new one — which is how this sheet spent a release calling
+   measuredIn() on a copy that predated it and never went green. Per
+   minute rather than per load so a quick reload still hits cache. */
+probe.src = "index.html?sheet=" + Math.floor(Date.now() / 60000);
 
 build();
 tick();
