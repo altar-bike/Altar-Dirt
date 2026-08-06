@@ -64,7 +64,7 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 <div class="wrap">
 
 <h1>Soil &amp; Exposure Review</h1>
-<p class="lede">Soil and exposure are both Matt's now, as of 6 Aug 2026. Keep this open for revisions, and for the fourteen spots not on the page yet.</p>
+<p class="lede">Soil and exposure are both Matt's now, as of 6 Aug 2026. Twenty-one spots are live; three below still need a pin from him.</p>
 
 <div id="status">Loading the live page and waiting for measured data…</div>
 
@@ -78,7 +78,7 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 </div>
 
 <div class="note warn">
-<p><strong>Out-of-state spots load on request.</strong> Windrock and Snowshoe sit behind the page's "Worth the drive" button so the page stays quick. This sheet clicks it for you, but they arrive later than the rest — if they read "not loaded", give it a few more seconds.</p>
+<p><strong>Out-of-state spots load on request.</strong> Windrock, Snowshoe, WildSide and Jarrod's Place sit behind the page's "Worth the drive" button so the page stays quick. This sheet clicks it for you, but they arrive later than the rest — if they read "not loaded", give it a few more seconds.</p>
 </div>
 
 <h2>What the numbers do</h2>
@@ -121,7 +121,7 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 </div>
 
 <h2>The new spots</h2>
-<p>Fourteen areas named but not on the page yet. Your 6 Aug answers are filled in below — change anything you've rethought. What they're actually waiting on now is a riding-area coordinate for each; creek gauges are already scouted for most.</p>
+<p>Eleven of the fourteen shipped to the live page on 6 Aug and now appear in the table above. These three still need a pin from you — the exact spot where people actually ride, a dropped pin or Plus Code both work. Soil and exposure below are your 6 Aug answers.</p>
 <table id="pending">
 <thead><tr><th>Spot</th><th>Soil</th><th>Exposure</th><th>Gauge already found</th></tr></thead>
 <tbody></tbody>
@@ -146,21 +146,13 @@ button:hover{border-color:var(--rust);color:var(--rust)}
    sheet asks him to REVISE rather than to answer again from scratch —
    the empty-dropdown version of this table kept asking a question he had
    already answered. */
+/* The other eleven shipped to the live TRAILS list on 6 Aug 2026 and
+   now show in the current-spots table above. These three are blocked on
+   a riding-area pin from Matt. */
 var PENDING = [
-  ["Big Ivy",                     "loam",     "shaded",  "Ivy R nr Marshall — 9.2 mi (watershed, not nearest)"],
-  ["Stony Fork Park",             "loam",     "shaded",  "Hominy Cr — 6.0 mi"],
-  ["Mills River Valley Overlook", "loam",     "shaded",  "not yet scouted"],
-  ["Bent Creek Gap",              "blend",    "shaded",  "needs a better Plus Code from you"],
-  ["Green River Game Lands",      "loam",     "shaded",  "not yet scouted"],
-  ["Berm Park",                   "clayrock", "mixed",   "Pigeon R nr Canton — 1.7 mi"],
-  ["Beacon Park",                 "clay",     "exposed", "not yet scouted"],
-  ["Sugar Mountain",              "clayrock", "exposed", "Buckeye Cr — 6.4 mi"],
-  ["Beech Mountain",              "clayrock", "exposed", "Buckeye Cr abv lake — 1.2 mi"],
-  ["Old Fort",                    "blend",    "shaded",  "Catawba R — 7.8 mi; needs a riding-area coordinate"],
-  ["Mt Mitchell",                 "loam",     "shaded",  "South Toe R nr Celo — 6.5 mi"],
-  ["Ride Rock Creek",             "clay",     "mixed",   "Big Falls Cr nr Tigerville SC — 3.9 mi"],
-  ["WildSide Bike Park",          "clayrock", "mixed",   "W Prong Little Pigeon — 6.3 mi"],
-  ["Jarrod's Place",              "rocky",    "exposed", "Chattooga R at Summerville — 1.1 mi"]
+  ["Stony Fork Park", "loam",  "shaded",  "needs your pin — no public trail listing found"],
+  ["Bent Creek Gap",  "blend", "shaded",  "needs your Plus Code — the OSM road point sits down in the valley"],
+  ["Beacon Park",     "clay",  "exposed", "needs your pin — Swannanoa, exact spot unclear"]
 ];
 
 var EXPS = ["shaded", "mixed", "exposed"];
