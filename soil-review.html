@@ -121,7 +121,7 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 </div>
 
 <h2>The new spots</h2>
-<p>Fourteen areas named but not on the page yet — they need both values from you. Creek gauges are already scouted for most.</p>
+<p>Fourteen areas named but not on the page yet. Your 6 Aug answers are filled in below — change anything you've rethought. What they're actually waiting on now is a riding-area coordinate for each; creek gauges are already scouted for most.</p>
 <table id="pending">
 <thead><tr><th>Spot</th><th>Soil</th><th>Exposure</th><th>Gauge already found</th></tr></thead>
 <tbody></tbody>
@@ -133,7 +133,7 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 <textarea id="out" readonly spellcheck="false"></textarea>
 
 <div class="foot">
-<p>Score bands: <span class="num">88+</span> hero &middot; <span class="num">72+</span> good &middot; <span class="num">56+</span> soft &middot; below that it reads poor or slop. Only the wetness terms respond to soil and exposure; the active-rain and frozen-ground terms don't.</p>
+<p>Score bands: <span class="num">88+</span> hero &middot; <span class="num">72+</span> good &middot; <span class="num">56+</span> soft &middot; below that it reads wet or slop. Only the wetness terms respond to soil and exposure; the active-rain and frozen-ground terms don't.</p>
 <p>Altar Cycles &middot; reads the live model on every load.</p>
 </div>
 
@@ -142,21 +142,25 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 <iframe id="probe" title="live model (hidden)"></iframe>
 
 <script>
+/* soil + exposure are Matt's answers from 6 Aug 2026, prefilled so the
+   sheet asks him to REVISE rather than to answer again from scratch —
+   the empty-dropdown version of this table kept asking a question he had
+   already answered. */
 var PENDING = [
-  ["Big Ivy",                     "Ivy R nr Marshall — 9.2 mi (watershed, not nearest)"],
-  ["Stony Fork Park",             "Hominy Cr — 6.0 mi"],
-  ["Mills River Valley Overlook", "not yet scouted"],
-  ["Bent Creek Gap",              "needs a better Plus Code from you"],
-  ["Green River Game Lands",      "not yet scouted"],
-  ["Berm Park",                   "Pigeon R nr Canton — 1.7 mi"],
-  ["Beacon Park",                 "not yet scouted"],
-  ["Sugar Mountain",              "Buckeye Cr — 6.4 mi"],
-  ["Beech Mountain",              "Buckeye Cr abv lake — 1.2 mi"],
-  ["Old Fort",                    "Catawba R — 7.8 mi; needs a riding-area coordinate"],
-  ["Mt Mitchell",                 "South Toe R nr Celo — 6.5 mi"],
-  ["Ride Rock Creek",             "Big Falls Cr nr Tigerville SC — 3.9 mi"],
-  ["WildSide Bike Park",          "W Prong Little Pigeon — 6.3 mi"],
-  ["Jarrod's Place",              "Chattooga R at Summerville — 1.1 mi"]
+  ["Big Ivy",                     "loam",     "shaded",  "Ivy R nr Marshall — 9.2 mi (watershed, not nearest)"],
+  ["Stony Fork Park",             "loam",     "shaded",  "Hominy Cr — 6.0 mi"],
+  ["Mills River Valley Overlook", "loam",     "shaded",  "not yet scouted"],
+  ["Bent Creek Gap",              "blend",    "shaded",  "needs a better Plus Code from you"],
+  ["Green River Game Lands",      "loam",     "shaded",  "not yet scouted"],
+  ["Berm Park",                   "clayrock", "mixed",   "Pigeon R nr Canton — 1.7 mi"],
+  ["Beacon Park",                 "clay",     "exposed", "not yet scouted"],
+  ["Sugar Mountain",              "clayrock", "exposed", "Buckeye Cr — 6.4 mi"],
+  ["Beech Mountain",              "clayrock", "exposed", "Buckeye Cr abv lake — 1.2 mi"],
+  ["Old Fort",                    "blend",    "shaded",  "Catawba R — 7.8 mi; needs a riding-area coordinate"],
+  ["Mt Mitchell",                 "loam",     "shaded",  "South Toe R nr Celo — 6.5 mi"],
+  ["Ride Rock Creek",             "clay",     "mixed",   "Big Falls Cr nr Tigerville SC — 3.9 mi"],
+  ["WildSide Bike Park",          "clayrock", "mixed",   "W Prong Little Pigeon — 6.3 mi"],
+  ["Jarrod's Place",              "rocky",    "exposed", "Chattooga R at Summerville — 1.1 mi"]
 ];
 
 var EXPS = ["shaded", "mixed", "exposed"];
@@ -268,6 +272,17 @@ function tick() {
         + "empty — these are forecast-only numbers. Check the footer of the trail page.";
       return;
     }
+    if (src && !src.wx) {
+      /* Soil probes without rain gauges: measured RAIN is the only
+         measured input that changes the score (probes and CoCoRaHS are
+         display rows), so a green bar here would bless forecast-rain
+         scores as "measured". Say what actually arrived. */
+      statusEl.className = "";
+      statusEl.textContent = "All " + TRAILS.length + " spots in with " + src.stations
+        + " soil probes, but ZERO rain gauges — the scores are running on forecast rain. "
+        + "Readable, but don't size anything on them.";
+      return;
+    }
     statusEl.className = "done";
     statusEl.textContent = "All " + TRAILS.length + " spots in, measured data included"
       + (src ? " (" + src.wx + " rain gauges, " + src.stations + " soil probes)" : "")
@@ -279,8 +294,9 @@ function tick() {
     statusEl.textContent = "Gave up waiting. " + built.length + " of " + local.length
       + " local spots and " + awayIn.length + " of " + away.length
       + " out-of-state are in"
-      + (settled ? "" : ", and the measured layer never landed")
-      + "; treat every number as forecast-only.";
+      + (settled ? " and the measured layer did land — loaded spots are readable"
+                 : ", and the measured layer never landed — treat every number as forecast-only")
+      + ".";
     return;
   }
   statusEl.className = "";
@@ -312,13 +328,13 @@ function buildRows(A) {
     var tr = document.createElement("tr");
     tr.className = "pend";
     tr.innerHTML = "<td>" + p[0] + "</td>" +
-      "<td>" + sel(SOILKEYS, "", "unset") + "</td>" +
-      "<td>" + sel(EXPS, "", "unset") + "</td>" +
-      "<td><span class='band'>" + p[1] + "</span></td>";
+      "<td>" + sel(SOILKEYS, p[1]) + "</td>" +
+      "<td>" + sel(EXPS, p[2]) + "</td>" +
+      "<td><span class='band'>" + p[3] + "</span></td>";
     pendBody.appendChild(tr);
-    tr.querySelectorAll("select").forEach(function (s) {
-      s.addEventListener("change", function () { s.classList.toggle("unset", !s.value); build(); });
-    });
+    var ss = tr.querySelectorAll("select");
+    ss[0].addEventListener("change", function () { mark(this, p[1]); build(); });
+    ss[1].addEventListener("change", function () { mark(this, p[2]); build(); });
   });
 }
 
@@ -392,8 +408,10 @@ function build() {
   PENDING.forEach(function (p, i) {
     var tr = pendBody.children[i];
     var ss = tr ? tr.querySelectorAll("select") : [];
-    var a = ss[0] ? ss[0].value : "", b = ss[1] ? ss[1].value : "";
-    lines.push("  " + p[0] + ": " + (a && b ? a + " / " + b : (a || b ? (a || "?") + " / " + (b || "?") : "— still thinking")));
+    var a = ss[0] ? ss[0].value : p[1], b = ss[1] ? ss[1].value : p[2];
+    var changed = (a !== p[1] || b !== p[2]);
+    lines.push("  " + (changed ? "REVISED " : "  keep  ") + p[0] + ": " + a + " / " + b +
+      (changed ? "   (was " + p[1] + " / " + p[2] + " on 6 Aug)" : ""));
   });
   lines.push("");
   lines.push("Read live from the model at " + (new Date()).toString().slice(0, 24) + ".");
