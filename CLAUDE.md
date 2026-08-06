@@ -8,13 +8,13 @@ Put this file in the project folder root as `CLAUDE.md` and it loads automatical
 
 ## What this project is
 
-A single static HTML page that scores mountain bike trail rideability from weather data. It reads Open-Meteo (soil moisture at 0–1cm and 3–9cm, soil temperature at 6cm, hourly rain, sun, wind, humidity — three days back, four forward), runs a scoring model in the browser, and shows a per-hour condition strip for nine riding areas around western NC.
+A single static HTML page that scores mountain bike trail rideability from weather data. It reads Open-Meteo (soil moisture at 0–1cm and 3–9cm, soil temperature at 6cm, hourly rain, sun, wind, humidity — three days back, six forward), runs a scoring model in the browser, and shows a per-hour condition strip for ten riding areas around western NC (eight local, two out-of-state behind the "Worth the drive" button).
 
 **`index.html` is the entire application.** No build step, no package manager, no dependencies except Google Fonts over CDN. Do not introduce any. If you find yourself wanting npm, stop and ask.
 
 Hosted on **GitHub Pages** from this repo. Linked from the Shopify nav at altar.bike.
 
-## Deployed state (as of 2026-08-05)
+## Deployed state (as of 2026-08-06)
 
 Ten cards: eight local (Pisgah split Lower/Upper) + two `away`. The
 whole local list loads in ONE Open-Meteo request. `/soil` carries
@@ -202,8 +202,8 @@ Search by string, never by line number — line numbers move.
 | Trail list | `var TRAILS` |
 | Soil multipliers | `var SOILS = {` |
 | Condition states and colours | `var STATES` |
-| Wetness thresholds | `sm > 0.27` and `sm < 0.11` |
-| Cache duration | `CACHE_MINUTES` |
+| Wetness thresholds | `if (sm > 0.27) {` in `evaluate` (the bare string `sm > 0.27` also matches a card-note line — use the brace form) |
+| Cache duration | `var CACHE_MINUTES` |
 | Rain gauge scoring radius | `var WX_MAX_MI` (tier 1), `var WX_TIER2_MI` (fallback) |
 | Rain gauge warning radius | `var WX_WATCH_MI` |
 | Soil probes we don't believe | `var SOIL_PROBE_BLOCK` |
@@ -360,9 +360,13 @@ at 19:00 on 4 Aug, 22 hours after 0.92 in fell in four hours:
 
 | term | maths | points |
 |---|---|---|
-| subsoil 30% (above the 0.27 ceiling) | `(0.30−0.27) × 430 × 0.55` | −8 |
+| subsoil 30% (above the 0.27 ceiling) | `(0.30−0.27) × 430 × 0.55` | −7 |
 | 0.40 in still in the store | `0.40 × 46 × 0.55` | −10 |
-| | | **82 = "good"** |
+| | | **83 = "good"** |
+
+(Corrected 6 Aug 2026 — the first version of this table showed −8 and 82,
+which don't recompute from the formulas beside them: the terms are 7.095
+and 10.12, and 100 − 17.2 rounds to 83.)
 
 Both terms are halved by rocky's `wet: 0.55`. With `wet: 1.0` the same
 hour reads **69, "soft"** — the constant, not the physics, is deciding
@@ -446,7 +450,10 @@ The consequence worth acting on: the four trails with a gauge inside
 from a forecast that, in this weather, saw a fraction of the real rain.
 Widening `WX_MAX_MI`, or promoting the tier-2 watch gauge to a scoring
 input when it disagrees this hard, is now a change with evidence behind
-it. Wait for a fortnight and a drier spell before deciding how far.
+it. (**Shipped 5 Aug 2026** as `WX_TIER2_MI = 6`: a gauge at 3.5–6 mi now
+scores the trail when nothing closer exists, labelled `rain·2`. The
+watch-only annulus is 6–10 mi. What still deserves the fortnight of
+grading data is whether 6 is the right number.)
 
 **What to do with it after ~2 weeks:** trails with a `ratio` well under 1
 need either a wider `WX_MAX_MI`, a closer gauge, or less trust in the
@@ -462,9 +469,16 @@ Current values, all of which are **my original guesses and unvalidated**:
 | Soil | `wet` (penalty multiplier) | `dry` (drying rate) |
 |---|---|---|
 | clay | 1.30 | 0.75 |
+| clayrock | 1.05 | 0.98 |
 | loam | 1.00 | 1.00 |
-| rocky | 0.55 | 1.40 |
+| blend | 0.95 | 1.05 |
 | sandy | 0.70 | 1.30 |
+| rocky | 0.55 | 1.40 |
+
+(`clayrock` and `blend` added 5 Aug 2026. Note `clayrock.dry` 0.98 is a
+hand-nudge, not the stated 2:1 recipe, which gives 0.9667 — the other
+three derived cells follow the recipe exactly. Sub-point effect; noted so
+a recalibration doesn't chase the discrepancy as a bug.)
 
 Tacky band: wetness between **0.11 and 0.27** m³/m³. Above 0.27 takes a penalty, below 0.11 reads as blown out. Also generic loam, also a guess.
 
@@ -523,7 +537,7 @@ Matt exports the `reports` tab from the calibration sheet. Columns include `verd
 
 - **`verdict` is the direction the score should move.** `+1` = the page scored it too low, it rode better. `-1` = scored too high, it rode worse. `0` = about right.
 - **Filter to `known_crew = yes`.** The endpoint is public; unlisted names are untrusted.
-- **Respect `when`.** A `yesterday` rating must be matched against yesterday's model state, not the snapshot in the row. Either drop those or handle them explicitly — don't silently treat them as current.
+- **Respect `when` on pre-v4 rows only.** Since v4 (5 Aug 2026) the row's model snapshot is already taken at the hour the rider says they rode (`rode_at` via `stateAt()`), so v4 rows need no re-matching. Rows filed BEFORE v4 snapshot the hour the page was open — for those, a `yesterday` rating must be matched against yesterday's model state or dropped.
 - **Group by soil class, not by trail.** Of the ten areas, after Matt's
   6 Aug 2026 pass: three `clayrock` (Pisgah Lower, Pisgah Upper,
   Windrock), two `clay` (Bent Creek, Kanuga), two `blend` (North Mills,
@@ -778,15 +792,23 @@ choosing entirely.
 The tiebreak exists because DuPont sits 16.1 miles from *both* FLET
 (2,067ft, 0.44 m³/m³) and FRYI (5,320ft, 0.25) — without a rule, which
 of two wildly different numbers it showed came down to iteration order.
-Current picks: Bent Creek, North Mills River, DuPont and Ride Kanuga →
-FLET; Wilson Creek → MORG; Hatley Pointe → BURN.
+(**Stale as of 5 Aug 2026, kept for history:** the picks listed below
+predate the FLET soil-probe block. FLET's moisture readings are irrigated
+research plots and are excluded via `SOIL_PROBE_BLOCK` — its rain gauge is
+kept. Any trail that used to borrow FLET's soil row now falls to the next
+station the tiebreak finds; don't trust this paragraph for current picks,
+read the live card's soil row instead.)
 
-**Pisgah Proper is pinned to FLET** via `station: "FLET"`. Distance
-alone would give it Frying Pan Mountain (8 mi, 5,320ft) over FLET
-(13.7 mi, 2,067ft), but Matt's read is that most of the riding —
-Black Mountain, Clawhammer, Bennett Gap — sits nearer the valley than
-the summit, so the lower sensor speaks for more of it. This is the
-kind of call to take from him rather than the map.
+Old picks, pre-block: Bent Creek, North Mills River, DuPont and Ride
+Kanuga → FLET; Wilson Creek → MORG; Hatley Pointe → BURN.
+
+**Pisgah Proper no longer exists and the FLET pin is gone.** The trail
+split into Lower/Upper on 4 Aug 2026, the Lower card briefly kept a
+`station: "FLET"` pin, and the pin was removed on 5 Aug when the probe
+was blocked. Lower now falls to FRYI (8 mi, 5,320ft against a ~2,200ft
+trailhead) — an elevation mismatch worth revisiting if a valley-elevation
+probe ever appears inside ~10 mi (see the USCRN "Asheville 13 S" note in
+the 6 Aug review).
 
 ### The soil sensors do not measure what the cards imply (4 Aug 2026)
 
