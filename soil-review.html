@@ -239,30 +239,54 @@ function tick() {
 
   var local = TRAILS.filter(function (t) { return !t.away; });
   var away = TRAILS.filter(function (t) { return t.away; });
-  var measured = local.filter(function (t) {
-    var r = A.at(t.name);
-    return r && (r.hasSoil || r.rainTier);
-  });
+  var built = local.filter(function (t) { return !!A.at(t.name); });
   var awayIn = away.filter(function (t) { return !!A.at(t.name); });
+
+  /* The only honest "safe to read" signal is the page's own
+     MEASURED_IN. An earlier version of this sheet gated on
+     `hasSoil`, which just means Open-Meteo returned a soil-moisture
+     array — true on the first forecast paint — so the bar went green
+     over forecast-only numbers and Bent Creek showed 43 where the
+     measured answer was 0. Fall back to the per-trail rain tier only
+     on an old index.html that predates the flag. */
+  var settled = typeof A.measuredIn === "function"
+    ? A.measuredIn()
+    : local.every(function (t) { var r = A.at(t.name); return r && r.rainTier; });
 
   paint(A);
 
-  if (measured.length >= local.length && awayIn.length >= away.length) {
+  if (settled && built.length >= local.length && awayIn.length >= away.length) {
+    var src = typeof A.sources === "function" ? A.sources() : null;
+    var live = (A.at(local[0].name) || {}).localTime || "now";
+    if (src && !src.wx && !src.stations) {
+      /* The measured layer settled but brought nothing — /soil down, or
+         every source degraded. The scores are real, they are just
+         forecast-only, and saying "measured data included" here would
+         be the exact lie this bar exists to prevent. */
+      statusEl.className = "";
+      statusEl.textContent = "All " + TRAILS.length + " spots in, but the measured layer came back "
+        + "empty — these are forecast-only numbers. Check the footer of the trail page.";
+      return;
+    }
     statusEl.className = "done";
-    statusEl.textContent = "All " + TRAILS.length + " spots in, measured data included. Live as of "
-      + ((A.at(local[0].name) || {}).localTime || "now") + ".";
+    statusEl.textContent = "All " + TRAILS.length + " spots in, measured data included"
+      + (src ? " (" + src.wx + " rain gauges, " + src.stations + " soil probes)" : "")
+      + ". Live as of " + live + ".";
     return;
   }
   if (tries > 180) {
     statusEl.className = "";
-    statusEl.textContent = "Gave up waiting. " + measured.length + " of " + local.length
+    statusEl.textContent = "Gave up waiting. " + built.length + " of " + local.length
       + " local spots and " + awayIn.length + " of " + away.length
-      + " out-of-state are in; anything still reading \"not loaded\" never arrived.";
+      + " out-of-state are in"
+      + (settled ? "" : ", and the measured layer never landed")
+      + "; treat every number as forecast-only.";
     return;
   }
   statusEl.className = "";
-  statusEl.textContent = "Waiting for measured data — " + measured.length + " of " + local.length
-    + " local spots" + (away.length ? ", " + awayIn.length + " of " + away.length + " out-of-state" : "")
+  statusEl.textContent = "Waiting — " + built.length + " of " + local.length + " local spots"
+    + (away.length ? ", " + awayIn.length + " of " + away.length + " out-of-state" : "")
+    + ", measured layer " + (settled ? "in" : "still out")
     + ". Don't read the numbers yet.";
   setTimeout(tick, 1000);
 }
