@@ -361,9 +361,14 @@ function build() {
   });
   lines.push("");
   lines.push("NEW SPOTS:");
+  /* build() also runs once at load, before buildRows() has put any rows
+     in the DOM — the first version indexed straight into pendBody and
+     threw there, which killed the script before tick() ever started and
+     left the sheet frozen on its loading line. Tolerate empty. */
   PENDING.forEach(function (p, i) {
-    var ss = pendBody.children[i].querySelectorAll("select");
-    var a = ss[0].value, b = ss[1].value;
+    var tr = pendBody.children[i];
+    var ss = tr ? tr.querySelectorAll("select") : [];
+    var a = ss[0] ? ss[0].value : "", b = ss[1] ? ss[1].value : "";
     lines.push("  " + p[0] + ": " + (a && b ? a + " / " + b : (a || b ? (a || "?") + " / " + (b || "?") : "— still thinking")));
   });
   lines.push("");
