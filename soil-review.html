@@ -170,15 +170,6 @@ var probe = document.getElementById("probe");
 var picks = {};   /* name -> {soil, exp} */
 var TRAILS = [];
 
-function band(s) {
-  if (s === null || s === undefined) return "";
-  if (s >= 88) return "hero";
-  if (s >= 72) return "good";
-  if (s >= 56) return "soft";
-  if (s >= 40) return "poor";
-  return "slop";
-}
-
 /* "2026-08-07T12:00" -> "Fri 12p". Same clock the page runs on, so no
    timezone maths — the string is already local to the trail. */
 function whenLabel(iso) {
@@ -215,40 +206,65 @@ function api() {
    trail reports measured data, then stop and say so.
    --------------------------------------------------------------------- */
 var tries = 0;
+var apiWaits = 0;
 var awayAsked = false;
 
 function tick() {
-  tries++;
   var A = api();
+
+  /* index.html has its fonts and four upstream fetches to get through
+     before it defines ALTAR_MODEL, and a cold Pages cache makes that
+     slower than it sounds. So wait a long time, and keep saying so —
+     a poller that quietly gave up looks exactly like one still going.
+     An earlier version capped this at 30s and died silently, which on
+     a cold load left the sheet frozen on "Loading…" forever. */
   if (!A) {
-    if (tries > 60) statusEl.textContent = "Could not reach the live page. Open index.html in this same folder and try again.";
-    else setTimeout(tick, 500);
+    apiWaits++;
+    if (apiWaits > 480) {
+      statusEl.textContent = "The trail page never finished loading. Reload this sheet, "
+        + "or open index.html on its own to see what it is stuck on.";
+      return;
+    }
+    if (apiWaits % 20 === 0) {
+      statusEl.textContent = "Still waiting for the trail page to load — "
+        + Math.round(apiWaits / 2) + "s so far.";
+    }
+    setTimeout(tick, 500);
     return;
   }
-  if (!TRAILS.length) { TRAILS = A.TRAILS.slice(); buildRows(A); }
 
-  if (!awayAsked && tries > 6) { awayAsked = true; try { A.loadAway(); } catch (e) {} }
+  tries++;
+  if (!TRAILS.length) { TRAILS = A.TRAILS.slice(); buildRows(A); }
+  if (!awayAsked && tries > 4) { awayAsked = true; try { A.loadAway(); } catch (e) {} }
 
   var local = TRAILS.filter(function (t) { return !t.away; });
-  var ready = local.filter(function (t) { return A.at(t.name); });
-  var measured = ready.filter(function (t) { var r = A.at(t.name); return r && (r.hasSoil || r.rainTier); });
+  var away = TRAILS.filter(function (t) { return t.away; });
+  var measured = local.filter(function (t) {
+    var r = A.at(t.name);
+    return r && (r.hasSoil || r.rainTier);
+  });
+  var awayIn = away.filter(function (t) { return !!A.at(t.name); });
 
   paint(A);
 
-  if (measured.length >= local.length && tries > 8) {
-    var awayIn = TRAILS.filter(function (t) { return t.away && A.at(t.name); }).length;
-    var awayAll = TRAILS.filter(function (t) { return t.away; }).length;
+  if (measured.length >= local.length && awayIn.length >= away.length) {
     statusEl.className = "done";
-    statusEl.textContent = "Measured data is in for all " + local.length + " local spots"
-      + (awayAll ? " (" + awayIn + " of " + awayAll + " out-of-state)" : "")
-      + ". Numbers below are live as of " + (A.at(local[0].name) || {}).localTime + ".";
-    if (awayIn >= awayAll || tries > 70) return;
-  } else {
-    statusEl.className = "";
-    statusEl.textContent = "Waiting for measured data — " + measured.length + " of " + local.length
-      + " spots in. Don't read the numbers yet.";
+    statusEl.textContent = "All " + TRAILS.length + " spots in, measured data included. Live as of "
+      + ((A.at(local[0].name) || {}).localTime || "now") + ".";
+    return;
   }
-  if (tries < 90) setTimeout(tick, 1000);
+  if (tries > 180) {
+    statusEl.className = "";
+    statusEl.textContent = "Gave up waiting. " + measured.length + " of " + local.length
+      + " local spots and " + awayIn.length + " of " + away.length
+      + " out-of-state are in; anything still reading \"not loaded\" never arrived.";
+    return;
+  }
+  statusEl.className = "";
+  statusEl.textContent = "Waiting for measured data — " + measured.length + " of " + local.length
+    + " local spots" + (away.length ? ", " + awayIn.length + " of " + away.length + " out-of-state" : "")
+    + ". Don't read the numbers yet.";
+  setTimeout(tick, 1000);
 }
 
 function buildRows(A) {
