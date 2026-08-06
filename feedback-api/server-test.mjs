@@ -101,7 +101,9 @@ if (!parsed) {
      slid across entries would produce a plausible-looking number from
      the wrong trail, and only a bounds check catches that. */
   parsed.forEach((t) => {
-    if (!(t.lat > 34 && t.lat < 39.5 && t.lon > -85 && t.lon < -79)) {
+    /* Widened 6 Aug 2026: Jarrod's Place (Summerville GA) sits at
+       -85.16, just past the old -85 western fence. */
+    if (!(t.lat > 34 && t.lat < 39.5 && t.lon > -85.5 && t.lon < -79)) {
       problems.push("coordinate out of region for " + t.name + ": " + t.lat + "," + t.lon);
     }
   });
