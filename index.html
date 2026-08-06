@@ -464,12 +464,60 @@ window.ALTAR_SETTINGS = {
        seasons on it. */
     { name: "Hatley Pointe",    place: "Mars Hill, NC",          lat: 35.9547, lon: -82.5088, soil: "blend",    exposure: "shaded",
       zone: "NCZ048", czone: "NCC115", gauge: null,         gaugeMi: 0   },
+    /* ---- Added 6 Aug 2026: nine of Matt's fourteen new spots. Soil and
+       exposure are his (6 Aug sheet). Coordinates researched same day —
+       source named per entry; distances recomputed to these points, which
+       is why two gauges read farther than the 4-Aug town-based scout.
+       Three spots are still waiting on a pin from Matt and are NOT here:
+       Stony Fork Park, Bent Creek Gap, Beacon Park. */
+    /* Trailforks region point for Coleman Boundary; the riding runs the
+       FS74 corridor (Corner Rock up to Douglas Falls). Ivy River gauge is
+       15.3 mi from this point but drains the right watershed. */
+    { name: "Big Ivy",          place: "Coleman Boundary, NC",   lat: 35.7568, lon: -82.3491, soil: "loam",     exposure: "shaded",
+      zone: "NCZ053", czone: "NCC021", gauge: "03453000",   gaugeMi: 15.3 },
+    /* OSM node, confirmed against NPS milepost 404.5. */
+    { name: "Mills River Valley Overlook", place: "BRP mp 404.5, NC", lat: 35.4428, lon: -82.7198, soil: "loam", exposure: "shaded",
+      zone: "NCZ065", czone: "NCC089", gauge: null,         gaugeMi: 0   },
+    /* OSM game-land point; riding concentrates at the Cove/Bluff side —
+       nudge if Matt says the pin sits wrong. ECONet GRGL station is ON
+       this land, so soil/rain coverage is unusually good. */
+    { name: "Green River Game Lands", place: "Green River Cove, NC", lat: 35.2863, lon: -82.3123, soil: "loam", exposure: "shaded",
+      zone: "NCZ509", czone: "NCC149", gauge: null,         gaugeMi: 0   },
+    /* Trailforks: Chestnut Mountain Nature Park (Berm Park is the skills
+       hub inside it). */
+    { name: "Berm Park",        place: "Canton, NC",             lat: 35.5308, lon: -82.7981, soil: "clayrock", exposure: "mixed",
+      zone: "NCZ052", czone: "NCC087", gauge: "03456991",   gaugeMi: 2.9 },
+    /* OSM: Sugar Mountain Resort base. Lift-served park. */
+    { name: "Sugar Mountain",   place: "Banner Elk, NC",         lat: 36.1278, lon: -81.8692, soil: "clayrock", exposure: "exposed",
+      zone: "NCZ033", czone: "NCC011", gauge: "0347927162", gaugeMi: 6.6 },
+    /* OSM: Beech Mountain Resort. Emerald Outback sits on the same
+       summit if the town trails are what Matt means — same weather. */
+    { name: "Beech Mountain",   place: "Beech Mountain, NC",     lat: 36.1914, lon: -81.8781, soil: "clayrock", exposure: "exposed",
+      zone: "NCZ018", czone: "NCC189", gauge: "0347927162", gaugeMi: 2.5 },
+    /* Trailforks: Old Fort Gateway system (Kitsuma / Heartbreak side). */
+    { name: "Old Fort",         place: "Gateway trails, NC",     lat: 35.6507, lon: -82.1772, soil: "blend",    exposure: "shaded",
+      zone: "NCZ505", czone: "NCC111", gauge: "02137727",   gaugeMi: 7.0 },
+    /* OSM: Black Mountain Campground — the South Toe trail hub. The name
+       is Matt's; if he means summit-side riding instead, move the pin. */
+    { name: "Mt Mitchell",      place: "South Toe River, NC",    lat: 35.7523, lon: -82.2212, soil: "loam",     exposure: "shaded",
+      zone: "NCZ049", czone: "NCC199", gauge: "03463300",   gaugeMi: 5.8 },
+    /* Singletracks GPS for the park entrance, 298 W Rock Creek Rd. */
+    { name: "Ride Rock Creek",  place: "Zirconia, NC",           lat: 35.2007, lon: -82.5152, soil: "clay",     exposure: "mixed",
+      zone: "NCZ065", czone: "NCC089", gauge: "021623957",  gaugeMi: 6.7 },
     /* away: out of state, so not fetched until someone asks. Keeps the
        page quick and keeps us off Open-Meteo for trips nobody's taking. */
     { name: "Windrock",         place: "Oliver Springs, TN",     lat: 36.0640, lon: -84.3390, soil: "clayrock", exposure: "mixed",
       zone: "TNZ036", czone: "TNC001", gauge: null,         gaugeMi: 0,   away: true },
     { name: "Snowshoe",         place: "Snowshoe, WV",           lat: 38.4120, lon: -79.9960, soil: "loam",     exposure: "shaded",
-      zone: "WVZ523", czone: "WVC075", gauge: "03180900",   gaugeMi: 5.7, away: true }
+      zone: "WVZ523", czone: "WVC075", gauge: "03180900",   gaugeMi: 5.7, away: true },
+    /* Trailforks trail GPS (Rattler Ridge) — the park entrance is 1105
+       Laurel Lick Rd, Pigeon Forge. */
+    { name: "WildSide",         place: "Pigeon Forge, TN",       lat: 35.7439, lon: -83.5903, soil: "clayrock", exposure: "mixed",
+      zone: "TNZ073", czone: "TNC155", gauge: "03469251",   gaugeMi: 4.7, away: true },
+    /* Singletracks GPS, 3580 Dry Creek Rd — 10.1 mi from the Summerville
+       gauge (the 4-Aug scout's 1.1 mi was measured from the town). */
+    { name: "Jarrod's Place",   place: "Summerville, GA",        lat: 34.5014, lon: -85.1625, soil: "rocky",    exposure: "exposed",
+      zone: "GAZ011", czone: "GAC055", gauge: "02398000",   gaugeMi: 10.1, away: true }
   ];
 
   /* ==================================================================
@@ -491,7 +539,19 @@ window.ALTAR_SETTINGS = {
     "0344632850": { name: "Mud Creek nr Balfour",           por: "2020–2026",
       med: {1:110,2:113,3:116,4:104,5:90,6:68,7:62,8:65,9:46,10:56,11:68,12:84} },
     "02140510":   { name: "Wilson Creek at Adako",          por: "", med: null },
-    "03180900":   { name: "Greenbrier River at Clover Lick", por: "", med: null }
+    "03180900":   { name: "Greenbrier River at Clover Lick", por: "", med: null },
+    /* Added 6 Aug 2026 with the nine new spots. No monthly normals
+       computed yet, so these creek lines show level and trend but no
+       "% of normal" — compute med tables from USGS day-of-year medians
+       when there's an afternoon for it. Names from the USGS IV service. */
+    "03453000":   { name: "Ivy River nr Marshall",           por: "", med: null },
+    "03456991":   { name: "Pigeon River nr Canton",          por: "", med: null },
+    "0347927162": { name: "Buckeye Creek abv Buckeye Lake",   por: "", med: null },
+    "02137727":   { name: "Catawba River nr Pleasant Gardens", por: "", med: null },
+    "03463300":   { name: "South Toe River nr Celo",         por: "", med: null },
+    "021623957":  { name: "Big Falls Creek nr Tigerville SC", por: "", med: null },
+    "03469251":   { name: "W Prong Little Pigeon nr Gatlinburg", por: "", med: null },
+    "02398000":   { name: "Chattooga River at Summerville GA", por: "", med: null }
   };
 
   /* Settings come from the SETTINGS block at the top of this file. */
