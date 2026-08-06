@@ -208,6 +208,26 @@ Search by string, never by line number — line numbers move.
 | Rain gauge warning radius | `var WX_WATCH_MI` |
 | Soil probes we don't believe | `var SOIL_PROBE_BLOCK` |
 | Degraded-source line in the footer | `showDegraded` / `id="da-degraded"` |
+| Model handle for the review sheet | `window.ALTAR_MODEL` |
+| Cached payloads, keyed by trail | `var MODEL_RAWS` |
+
+### `soil-review.html` — the corrections sheet
+
+The sheet Matt fills in to correct `soil` and `exposure`. It is **live**:
+it loads `index.html` in a hidden same-origin iframe and calls
+`ALTAR_MODEL.at(name, soil, exposure)`, which re-runs the real
+`buildModel` against the payload already in memory and returns the score
+and recovery time that setting would produce. Nothing is snapshotted, so
+the sheet cannot drift from the page and never needs regenerating.
+
+Before 6 Aug 2026 it held pasted numbers and rescaled them arithmetically.
+That worked for `wet` and was silently wrong for `dry` — changing the
+exposure dropdown produced "no change", on the one sheet whose whole job
+was collecting exposure corrections.
+
+If you touch `buildModel`, keep `ALTAR_MODEL.at` returning `score`,
+`key` and `recovery`; the sheet reads those three by name. `at()` is
+read-only — it copies the trail before changing anything.
 
 ---
 
@@ -416,6 +436,23 @@ Current values, all of which are **my original guesses and unvalidated**:
 Tacky band: wetness between **0.11 and 0.27** m³/m³. Above 0.27 takes a penalty, below 0.11 reads as blown out. Also generic loam, also a guess.
 
 **Exposure** multipliers stack on `dry`: shaded 0.70, mixed 1.00, exposed 1.35.
+
+**How big is exposure, measured.** This file used to imply exposure hit
+about as hard as soil. It does not. Run against live data on the evening
+of 5 Aug 2026, swinging a trail from `shaded` to `exposed` moved the
+current score by **0–14 points** (median about 6), against 19 for Bent
+Creek and 28 for Pisgah Lower when the soil labels were corrected. So on
+the number, exposure is roughly a third of soil.
+
+Where it is large is **recovery time**. Same run: Pisgah Lower came good
+26 hours earlier as `exposed` than as `shaded`, Pisgah Upper 21 hours,
+and Bent Creek recovered inside the forecast window as `exposed` but not
+as `shaded`. That is the mechanism working as designed — exposure scales
+a *rate*, so it needs dry hours to compound and does almost nothing to a
+score read while rain is still falling. Judge an exposure change by the
+`recovery` timestamp, not by today's score, and never size it on a wet
+day: on 5 Aug half the cards were floored at slop and showed a swing of
+zero.
 
 ### What a rating carries (v4, 5 Aug 2026)
 
