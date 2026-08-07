@@ -589,7 +589,14 @@ window.ALTAR_SETTINGS = {
     soft:   { label: "Soft",         color: "#B85C2A", blurb: "Rideable. Expect rut and braking bump." },
     wet:    { label: "Wet",          color: "#2C4A5A", blurb: "Trail will take damage. Stay off the brakes." },
     slop:   { label: "Slop",         color: "#7E2E18", blurb: "Riding this tears it up. Pick somewhere else." },
-    dusty:  { label: "Blown out",    color: "#A9998A", blurb: "Loose over hard. Corners will let go." }
+    dusty:  { label: "Blown out",    color: "#A9998A", blurb: "Loose over hard. Corners will let go." },
+    /* Added 7 Aug 2026 for the severe end of the dry side, now reachable
+       since the dusty penalty is soil-scaled and uncapped-in-practice
+       (see SOILS.dusty and evaluate()). Color is a paler, chalkier
+       variant of dusty's tone, not a new hue — still off-palette like
+       dusty itself, so it needs the same sign-off dusty's bone tone got.
+       Blurb is a placeholder — Matt's wordsmithing this on the sheet. */
+    powder: { label: "Powder",       color: "#C4B8A8", blurb: "Bone dry and slick with it. Traction's gone, not just reduced." }
   };
 
   /* Listed worst-to-best at holding water, so the ranking is readable at a
@@ -600,13 +607,24 @@ window.ALTAR_SETTINGS = {
      constants are the component values weighted by how much of each is
      underfoot: clayrock is roughly two parts clay to one part rock, blend is
      equal thirds brown dirt, clay and rock. */
+  /* `dusty` added 7 Aug 2026 — how hard THIS soil is punished for drying
+     past the tacky band (STATES.dusty / STATES.powder below). Until now
+     every soil got the same flat, capped penalty on the dry side, while
+     the wet side already scaled by soil via `wet`. Sand blows out fast
+     and loose; rock has little loose fines to shed either way; clay
+     tends to hardpack/crack rather than turn to powder. clayrock and
+     blend follow the same 2:1 and thirds recipe as their other columns
+     (clay 0.70, loam 1.00, sandy 1.45, rocky 0.55 are the source values;
+     unlike clayrock.dry, no hand-nudge here — untested, so no reason yet
+     to deviate from the recipe). Guesses, same as everything else in
+     this table — first thing to check against rider ratings. */
   var SOILS = {
-    clay:     { wet: 1.30, dry: 0.75, name: "clay" },
-    clayrock: { wet: 1.05, dry: 0.98, name: "clay + rock" },
-    loam:     { wet: 1.00, dry: 1.00, name: "loam" },
-    blend:    { wet: 0.95, dry: 1.05, name: "dirt + clay + rock" },
-    sandy:    { wet: 0.70, dry: 1.30, name: "sand" },
-    rocky:    { wet: 0.55, dry: 1.40, name: "rock" }
+    clay:     { wet: 1.30, dry: 0.75, dusty: 0.70, name: "clay" },
+    clayrock: { wet: 1.05, dry: 0.98, dusty: 0.65, name: "clay + rock" },
+    loam:     { wet: 1.00, dry: 1.00, dusty: 1.00, name: "loam" },
+    blend:    { wet: 0.95, dry: 1.05, dusty: 0.75, name: "dirt + clay + rock" },
+    sandy:    { wet: 0.70, dry: 1.30, dusty: 1.45, name: "sand" },
+    rocky:    { wet: 0.55, dry: 1.40, dusty: 0.55, name: "rock" }
   };
   var EXPOSURES = {
     shaded:  { dry: 0.70, name: "shaded" },
@@ -732,6 +750,7 @@ window.ALTAR_SETTINGS = {
     var h = data.hourly, times = h.time;
     var soilMult = SOILS[t.soil].wet;
     var dryMult  = SOILS[t.soil].dry * EXPOSURES[t.exposure].dry;
+    var dustyMult = SOILS[t.soil].dusty;
 
     var nowKey = data.current.time.slice(0, 13), nowIdx = -1;
     for (var i = 0; i < times.length; i++) if (times[i].slice(0, 13) === nowKey) { nowIdx = i; break; }
@@ -846,7 +865,13 @@ window.ALTAR_SETTINGS = {
           score -= p;
           drivers.push({ w: "\u2212" + r0(p), t: "subsoil holding " + r0(sm * 100) + "% water by volume" });
         } else if (sm < 0.11) {
-          p = Math.min(22, (0.11 - sm) * 260);
+          /* Raised from a flat 22-point cap (7 Aug 2026) and scaled by
+             soil via `dustyMult` \u2014 sand now genuinely blows out worse
+             than clay or rock at the same moisture deficit, and severe,
+             prolonged dryness can pull the score low enough to reach
+             STATES.powder below (see the key-assignment block). 60 is a
+             safety ceiling, rarely reached in practice. */
+          p = Math.min(60, (0.11 - sm) * 300 * dustyMult);
           score -= p; dusty = true;
           drivers.push({ w: "\u2212" + r0(p), t: "subsoil at " + r0(sm * 100) + "% \u2014 dried past tacky" });
         } else {
@@ -894,8 +919,19 @@ window.ALTAR_SETTINGS = {
 
       score = clamp(score, 0, 100);
       var key;
+      /* `dusty` now always routes to "dusty" or "powder" below, never
+         through to the wet-side bands (7 Aug 2026) — previously
+         `dusty && score >= 58` let a dry trail that had also picked up
+         an unrelated penalty (wind gust, thaw) fall through and read as
+         "wet" or "slop", which is backwards for a trail that's too dry,
+         not too wet. `powder` is the severe end enabled by the soil-
+         scaled, higher-cap penalty above; in practice only sandy (and
+         loam/blend stacked with another penalty) reaches it — clay and
+         rocky are built to stay out of it, which matches clay hardpacking
+         and rock having little loose material to shed either way. */
       if (frozen) key = "frozen";
-      else if (dusty && score >= 58) key = "dusty";
+      else if (dusty && score < 65) key = "powder";
+      else if (dusty) key = "dusty";
       else if (score >= 88) key = "hero";
       else if (score >= 72) key = "good";
       else if (score >= 56) key = "soft";
@@ -1344,7 +1380,7 @@ window.ALTAR_SETTINGS = {
   var models = {};
 
   (function legend() {
-    var order = ["hero","good","soft","wet","slop","dusty","frozen"], out = "";
+    var order = ["hero","good","soft","wet","slop","dusty","powder","frozen"], out = "";
     order.forEach(function (k) {
       out += '<span><i style="background:' + STATES[k].color + '"></i>' + esc(STATES[k].label) + "</span>";
     });
