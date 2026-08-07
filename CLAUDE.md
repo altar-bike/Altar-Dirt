@@ -468,21 +468,64 @@ This is the highest-value recurring work. Riders rate the **score** the page sho
 
 Current values, all of which are **my original guesses and unvalidated**:
 
-| Soil | `wet` (penalty multiplier) | `dry` (drying rate) |
-|---|---|---|
-| clay | 1.30 | 0.75 |
-| clayrock | 1.05 | 0.98 |
-| loam | 1.00 | 1.00 |
-| blend | 0.95 | 1.05 |
-| sandy | 0.70 | 1.30 |
-| rocky | 0.55 | 1.40 |
+| Soil | `wet` (penalty multiplier) | `dry` (drying rate) | `dusty` (blow-out severity) |
+|---|---|---|---|
+| clay | 1.30 | 0.75 | 0.70 |
+| clayrock | 1.05 | 0.98 | 0.65 |
+| loam | 1.00 | 1.00 | 1.00 |
+| blend | 0.95 | 1.05 | 0.75 |
+| sandy | 0.70 | 1.30 | 1.45 |
+| rocky | 0.55 | 1.40 | 0.55 |
 
 (`clayrock` and `blend` added 5 Aug 2026. Note `clayrock.dry` 0.98 is a
 hand-nudge, not the stated 2:1 recipe, which gives 0.9667 — the other
 three derived cells follow the recipe exactly. Sub-point effect; noted so
-a recalibration doesn't chase the discrepancy as a bug.)
+a recalibration doesn't chase the discrepancy as a bug. `dusty` added 7
+Aug 2026, both derived cells follow the recipe exactly with no nudge —
+no field data yet to justify one.)
 
 Tacky band: wetness between **0.11 and 0.27** m³/m³. Above 0.27 takes a penalty, below 0.11 reads as blown out. Also generic loam, also a guess.
+
+### The dry side didn't scale by soil until 7 Aug 2026
+
+Matt asked, correctly: trails aren't always tacky at a 100, so what stops
+a too-dry trail from reading as "Hero dirt"? Checked the code — the wet
+side already scaled its penalty by soil (`soilMult`, the `wet` column
+above), but the dry/dusty side did not. Every soil got the identical
+penalty, flat-capped at 22 points, for going below the 0.11 tacky floor.
+Sand and rock and clay all "blew out" the same amount, and the cap
+saturated early — anything below about sm=0.025 was already maxed out,
+so there was almost no range to tell a trail that had just tipped dry
+from one baked for a month.
+
+Fixed by adding the `dusty` column above (mirrors `wet`'s shape: sand
+punished hardest, rock and clay most forgiving — rock has little loose
+fines to shed either way, clay tends to hardpack/crack rather than turn
+to powder) and raising the cap from 22 to 60. New STATES entry
+**`powder`** (label "Powder") sits below `dusty` ("Blown out") for the
+severe end this unlocks — the key-assignment `if` chain now sends any
+`dusty`-flagged hour to `powder` or `dusty` by score, and never lets it
+fall through to `wet`/`slop`. That fall-through was a real bug the raised
+cap would otherwise have made worse: a dry trail that also picked up an
+unrelated penalty (wind gust, thaw) could previously drop below the old
+`dusty && score >= 58` gate and get labelled "Wet — stay off the brakes,"
+which is backwards for a trail that's too dry, not too wet.
+
+In practice, at identical bone-dry moisture with no other penalty,
+sandy is the only soil that reaches `powder` (floor ~52); everyone else
+lands in `dusty` (67–82). That's intentional, not a shortfall — matches
+the "sand blows out, clay hardpacks, rock barely notices" reasoning
+above — but it means `powder` will look like it's mostly a DuPont/sandy-
+trail state in practice, which is worth watching once real conditions
+exercise it. Tested against a synthetic bone-dry + wind-gust fixture via
+`ALTAR_MODEL.at()` across all six soils before shipping; see the git log
+for the commit that landed this.
+
+**Still open, ask Matt, don't guess:** the `powder` color (`#C4B8A8`, a
+paler variant of `dusty`'s bone tone) and its blurb are both first-pass
+placeholders — the color needs the same sign-off `dusty`'s off-palette
+tone got from Sarah, and the sentence is sitting on the condition-
+sentences edit sheet for Matt to rewrite along with the other seven.
 
 **Exposure** multipliers stack on `dry`: shaded 0.70, mixed 1.00, exposed 1.35.
 
