@@ -64,7 +64,7 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 <div class="wrap">
 
 <h1>Soil &amp; Exposure Review</h1>
-<p class="lede">Soil and exposure are both Matt's now, as of 6 Aug 2026. Twenty-one spots are live; three below still need a pin from him.</p>
+<p class="lede">Soil and exposure are both Matt's now, as of 6 Aug 2026. All twenty-four spots are live — Stony Fork Park, Bent Creek Gap and Beacon Park shipped 10 Aug once Matt sent pins for them.</p>
 
 <div id="status">Loading the live page and waiting for measured data…</div>
 
@@ -120,13 +120,6 @@ button:hover{border-color:var(--rust);color:var(--rust)}
 <p><strong>Reading "comes good".</strong> It is the first hour the model expects the spot back above the soft line, taken from the forecast ahead. A dash means it does not get there inside the window the page can see — which on a wet week means "not for a while", not "never".</p>
 </div>
 
-<h2>The new spots</h2>
-<p>Eleven of the fourteen shipped to the live page on 6 Aug and now appear in the table above. These three still need a pin from you — the exact spot where people actually ride, a dropped pin or Plus Code both work. Soil and exposure below are your 6 Aug answers.</p>
-<table id="pending">
-<thead><tr><th>Spot</th><th>Soil</th><th>Exposure</th><th>Gauge already found</th></tr></thead>
-<tbody></tbody>
-</table>
-
 <h2>Send it back</h2>
 <p>Fill in what you can — partial is fine, I'll take whatever's set — then copy this and paste it to me.</p>
 <button id="copy">Copy the summary</button>
@@ -146,14 +139,13 @@ button:hover{border-color:var(--rust);color:var(--rust)}
    sheet asks him to REVISE rather than to answer again from scratch —
    the empty-dropdown version of this table kept asking a question he had
    already answered. */
-/* The other eleven shipped to the live TRAILS list on 6 Aug 2026 and
-   now show in the current-spots table above. These three are blocked on
-   a riding-area pin from Matt. */
-var PENDING = [
-  ["Stony Fork Park", "loam",  "shaded",  "needs your pin — no public trail listing found"],
-  ["Bent Creek Gap",  "blend", "shaded",  "needs your Plus Code — the OSM road point sits down in the valley"],
-  ["Beacon Park",     "clay",  "exposed", "needs your pin — Swannanoa, exact spot unclear"]
-];
+/* Stony Fork Park, Bent Creek Gap and Beacon Park lived here as PENDING
+   (blocked on a riding-area pin from Matt) from 6 Aug until he sent Plus
+   Codes on 10 Aug — all three are in the live TRAILS list now, so this
+   goes back to empty. Left as an array, not deleted, since buildRows()
+   and build() already tolerate it being empty (see "Tolerate empty"
+   below) and the next round of new spots will want the same holding pen. */
+var PENDING = [];
 
 var EXPS = ["shaded", "mixed", "exposed"];
 var SOILKEYS = ["clay", "clayrock", "loam", "blend", "sandy", "rocky"];
@@ -391,21 +383,26 @@ function build() {
     }
     lines.push(line);
   });
-  lines.push("");
-  lines.push("NEW SPOTS:");
   /* build() also runs once at load, before buildRows() has put any rows
      in the DOM — the first version indexed straight into pendBody and
      threw there, which killed the script before tick() ever started and
-     left the sheet frozen on its loading line. Tolerate empty. */
-  PENDING.forEach(function (p, i) {
-    var tr = pendBody.children[i];
-    var ss = tr ? tr.querySelectorAll("select") : [];
-    var a = ss[0] ? ss[0].value : p[1], b = ss[1] ? ss[1].value : p[2];
-    var changed = (a !== p[1] || b !== p[2]);
-    lines.push("  " + (changed ? "REVISED " : "  keep  ") + p[0] + ": " + a + " / " + b +
-      (changed ? "   (was " + p[1] + " / " + p[2] + " on 6 Aug)" : ""));
-  });
-  lines.push("");
+     left the sheet frozen on its loading line. Tolerate empty — and as
+     of 10 Aug 2026, PENDING really is empty (all three spots shipped),
+     so skip the header entirely rather than print "NEW SPOTS:" over
+     nothing. */
+  if (PENDING.length) {
+    lines.push("");
+    lines.push("NEW SPOTS:");
+    PENDING.forEach(function (p, i) {
+      var tr = pendBody.children[i];
+      var ss = tr ? tr.querySelectorAll("select") : [];
+      var a = ss[0] ? ss[0].value : p[1], b = ss[1] ? ss[1].value : p[2];
+      var changed = (a !== p[1] || b !== p[2]);
+      lines.push("  " + (changed ? "REVISED " : "  keep  ") + p[0] + ": " + a + " / " + b +
+        (changed ? "   (was " + p[1] + " / " + p[2] + " on 6 Aug)" : ""));
+    });
+    lines.push("");
+  }
   lines.push("Read live from the model at " + (new Date()).toString().slice(0, 24) + ".");
   document.getElementById("out").value = lines.join("\n");
 }
