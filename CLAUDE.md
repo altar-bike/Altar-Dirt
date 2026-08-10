@@ -8,7 +8,7 @@ Put this file in the project folder root as `CLAUDE.md` and it loads automatical
 
 ## What this project is
 
-A single static HTML page that scores mountain bike trail rideability from weather data. It reads Open-Meteo (soil moisture at 0–1cm and 3–9cm, soil temperature at 6cm, hourly rain, sun, wind, humidity — three days back, six forward), runs a scoring model in the browser, and shows a per-hour condition strip for twenty-one riding areas around western NC (seventeen local, four out-of-state behind the "Worth the drive" button — count updated 6 Aug 2026 when nine of Matt's new spots shipped).
+A single static HTML page that scores mountain bike trail rideability from weather data. It reads Open-Meteo (soil moisture at 0–1cm and 3–9cm, soil temperature at 6cm, hourly rain, sun, wind, humidity — three days back, six forward), runs a scoring model in the browser, and shows a per-hour condition strip for twenty-four riding areas around western NC (twenty local, four out-of-state behind the "Worth the drive" button — count updated 6 Aug 2026 when nine of Matt's new spots shipped, then again 10 Aug 2026 when the last three shipped once he sent pins).
 
 **`index.html` is the entire application.** No build step, no package manager, no dependencies except Google Fonts over CDN. Do not introduce any. If you find yourself wanting npm, stop and ask.
 
@@ -265,15 +265,18 @@ naturally, no pin needed.
 
 Never guess a coordinate. Look it up and say where you got it.
 
-### New spots — eleven shipped 6 Aug 2026, three still need Matt's pin
+### New spots — all fourteen shipped, the last three 10 Aug 2026
 
 Matt named 14 additions on 4 Aug and gave soil and exposure for all of
-them on 6 Aug. **Eleven shipped to `TRAILS` the same day** with researched
+them on 6 Aug. **Eleven shipped to `TRAILS` that same day** with researched
 coordinates (source cited in each entry's comment) and zones resolved from
-`api.weather.gov/points`. Still waiting on a riding-area pin from Matt —
-no trustworthy public coordinate exists: **Stony Fork Park** (Candler),
-**Bent Creek Gap** (he has a Plus Code), **Beacon Park** (Swannanoa).
-**Never guess a coordinate.**
+`api.weather.gov/points`. The other three — **Stony Fork Park** (Candler),
+**Bent Creek Gap**, **Beacon Park** (Swannanoa) — had no trustworthy public
+coordinate, so they waited on a pin from Matt. He sent Plus Codes for all
+three on 10 Aug 2026 (`F757+8P`, `F82R+W62`, `JJ24+69` respectively),
+resolved via Google Maps (source cited per entry) and shipped the same
+day. **All fourteen are live now.** Never guess a coordinate — look it
+up and say where you got it.
 
 Matt's values, 6 Aug 2026:
 
@@ -299,13 +302,10 @@ the ski-resort downhill spots, which is what you would expect. Nothing
 currently deployed is `exposed`, so that multiplier is as untested as
 `sandy`.
 
-Still needed before any of them ship: a riding-area coordinate for all
-fourteen (Old Fort's known point is the town, and Bent Creek Gap needs a
-better Plus Code from Matt), gauges for the four not yet scouted, and
-monthly `med` tables for any new gauge.
-
 Creek gauges surveyed 4 Aug 2026 from the USGS active-IV site inventory
-(browser query, bBox per spot):
+(browser query, bBox per spot); the Stony Fork Park distance was recomputed
+and the Bent Creek Gap and Beacon Park rows added 10 Aug 2026 once Matt's
+pins came in:
 
 | Spot | Best gauge | Dist | Note |
 |---|---|---|---|
@@ -313,19 +313,21 @@ Creek gauges surveyed 4 Aug 2026 from the USGS active-IV site inventory
 | Berm Park (Canton) | 03456991 Pigeon R nr Canton | 1.7 mi | |
 | Beech Mountain | 0347927162 Buckeye Cr abv Buckeye Lk | 1.2 mi | below-lake twin 0347927164 exists; use above-lake, unregulated |
 | Ride Rock Creek (Zirconia) | 021623957 Big Falls Cr nr Tigerville SC | 3.9 mi | over the state line, same escarpment |
-| Stony Fork (Candler) | 0344878100 Hominy Cr | 6.0 mi | already in GAUGES — Stony Fork drains to Hominy, right watershed |
+| Stony Fork Park (Candler) | 0344878100 Hominy Cr | 10.6 mi | already in GAUGES — Stony Fork drains to Hominy, right watershed; recomputed 10 Aug from Matt's actual pin (was 6.0 mi from Candler's town center) |
 | Mt Mitchell | 03463300 South Toe R nr Celo | 6.5 mi | right side of the mountain |
 | Sugar Mountain | 0347927162 Buckeye Cr | 6.4 mi | marginal |
 | WildSide (Pigeon Forge) | 03469251 W Prong Little Pigeon nr Gatlinburg | 6.3 mi | away:true |
 | Old Fort | 02137727 Catawba R nr Pleasant Gardens | 7.8 mi | marginal; town coords — riding is ~2,700ft, needs a better point from Matt |
 | Big Ivy (Barnardsville) | 03453000 Ivy R nr Marshall | 9.2 mi | Beetree Cr is closer at 8.2 but drains the WRONG side of the ridge; Big Ivy drains via Dillingham Cr to the Ivy. Watershed beats distance. |
+| Bent Creek Gap (BRP mp 400) | 03446000 Mills River | 5.2 mi | closer of two French Broad-basin gauges nearby; already in GAUGES with real monthly medians |
+| Beacon Park (Swannanoa) | 03450000 Beetree Cr nr Swannanoa | 3.7 mi | same Swannanoa River valley; new to GAUGES 10 Aug 2026 — real USGS day-of-year medians, not estimated |
 
-Green River Game Lands, Bent Creek Gap, Mills River Valley Overlook,
-Beacon Park: run the same bBox query when their coordinates are settled
-(GRGL's is presumably the Green River itself — verify there's an active
-IV gauge). Monthly `med` tables need computing from USGS day-of-year
-medians per the existing GAUGES pattern before any of these show
-"% of normal".
+Green River Game Lands and Mills River Valley Overlook are the only two
+left without a gauge (`gauge: null` in `TRAILS`). Both already have
+coordinates — run the same bBox query to find a candidate (GRGL's is
+presumably the Green River itself — verify there's an active IV gauge),
+then pull real day-of-year medians per the existing GAUGES pattern before
+either shows "% of normal".
 
 ---
 
@@ -583,12 +585,13 @@ Matt exports the `reports` tab from the calibration sheet. Columns include `verd
 - **Filter to `known_crew = yes`.** The endpoint is public; unlisted names are untrusted.
 - **Respect `when` on pre-v4 rows only.** Since v4 (5 Aug 2026) the row's model snapshot is already taken at the hour the rider says they rode (`rode_at` via `stateAt()`), so v4 rows need no re-matching. Rows filed BEFORE v4 snapshot the hour the page was open — for those, a `yesterday` rating must be matched against yesterday's model state or dropped.
 - **Group by soil class, not by trail.** After the 6 Aug 2026 additions
-  (twenty-one areas): seven `clayrock` (Pisgah Lower, Pisgah Upper,
-  Windrock, Berm Park, Sugar Mountain, Beech Mountain, WildSide), three
-  `clay` (Bent Creek, Kanuga, Ride Rock Creek), three `blend` (North
-  Mills, Hatley Pointe, Old Fort), five `loam` (Snowshoe, Big Ivy, Mills
-  River Valley Overlook, Green River Game Lands, Mt Mitchell), one
-  `sandy` (DuPont), two `rocky` (Wilson Creek, Jarrod's Place).
+  (twenty-four areas, after the 10 Aug 2026 additions too): seven
+  `clayrock` (Pisgah Lower, Pisgah Upper, Windrock, Berm Park, Sugar
+  Mountain, Beech Mountain, WildSide), four `clay` (Bent Creek, Kanuga,
+  Ride Rock Creek, Beacon Park), four `blend` (North Mills, Hatley
+  Pointe, Old Fort, Bent Creek Gap), six `loam` (Snowshoe, Big Ivy, Mills
+  River Valley Overlook, Green River Game Lands, Mt Mitchell, Stony Fork
+  Park), one `sandy` (DuPont), two `rocky` (Wilson Creek, Jarrod's Place).
 - **`sandy` has exactly one trail and has never been validated.** DuPont
   moved to it on 6 Aug and is the only card feeding that pool, so its
   0.70 / 1.30 constants will be the last to get evidence. It is also the
