@@ -364,7 +364,6 @@ window.ALTAR_SETTINGS = {
 
   <footer class="da-foot">
     <div class="da-legend" id="da-legend"></div>
-    <p><b>This is a model, not a trail report.</b> Soil moisture and rainfall come from forecast data, not from someone standing on the trail. If a trail is closed, gated, or it rained harder than the model thinks, the model is wrong and your eyes are right. Check the land manager before you drive.</p>
     <p class="da-mono" style="font-size:11px;letter-spacing:.06em;">
       Weather data by <a href="https://open-meteo.com/">Open-Meteo.com</a> — CC BY 4.0.
       Rideability scores are Altar's own model built on top of that data.
@@ -374,13 +373,6 @@ window.ALTAR_SETTINGS = {
       NC State Climate Office.
       <span id="da-stamp"></span>
     </p>
-    <!-- Degraded data sources, named in public. The /soil payload has
-         carried `dropped` and `stale` diagnostics for a while and nothing
-         on the page ever read them, so CoCoRaHS could return zero rows
-         indefinitely and the only symptom was a row quietly not drawing.
-         A source that has failed should say so where the numbers are. -->
-    <p class="da-mono" id="da-degraded"
-       style="font-size:11px;letter-spacing:.06em;color:#B85C2A;display:none;"></p>
   </footer>
 </div>
 
@@ -1212,23 +1204,6 @@ window.ALTAR_SETTINGS = {
      rather than blocked — check them before pinning either. */
   var SOIL_PROBE_BLOCK = { FLET: "irrigated research plots — rain gauge fine, probe is not" };
 
-  /* Surface the payload's own diagnostics. Plain language, muted, and
-     only when something is actually wrong — but never nothing. */
-  function showDegraded(j) {
-    var el = document.getElementById("da-degraded");
-    if (!el) return;
-    var notes = [];
-    (j.dropped || []).forEach(function (d) { notes.push(String(d)); });
-    if ((j.stale || []).length) {
-      notes.push(j.stale.length + " station" + (j.stale.length > 1 ? "s" : "") +
-                 " reporting stale readings: " + j.stale.join(", "));
-    }
-    if (!notes.length) { el.style.display = "none"; el.textContent = ""; return; }
-    el.textContent = "Degraded data sources right now — " + notes.join("; ") +
-      ". Scores still run on forecast and whatever measured data did arrive.";
-    el.style.display = "";
-  }
-
   /* --- Measured soil moisture from NC State ECONet stations, through
          our own proxy so the CLOUDS key never reaches the browser. --- */
   function loadStations() {
@@ -1245,7 +1220,6 @@ window.ALTAR_SETTINGS = {
         }
         if (j.wx && j.wx.length) EXTRA.wx = j.wx;
         if (j.coco && j.coco.length) EXTRA.coco = j.coco;
-        showDegraded(j);
       })
       .catch(function () {});
   }
