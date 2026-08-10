@@ -191,10 +191,11 @@ if (r.outlookRows !== 5) problems.push("expected 5 outlook rows, got " + r.outlo
 
 if (r.errors.length) problems.push("cards showing an error: " + r.errors[0]);
 /* 8 original local + 2 original away + 9 spots added 6 Aug 2026 + 2 new
-   away (WildSide, Jarrod's) = 21. The stub scales to however many
-   coordinates the page asks for, so only this count needs touching when
-   the trail list grows. */
-if (r.cards !== 21) problems.push("expected 21 cards, got " + r.cards);
+   away (WildSide, Jarrod's) + 3 spots added 10 Aug 2026 (Stony Fork Park,
+   Bent Creek Gap, Beacon Park — all local) = 24. The stub scales to
+   however many coordinates the page asks for, so only this count needs
+   touching when the trail list grows. */
+if (r.cards !== 24) problems.push("expected 24 cards, got " + r.cards);
 if (r.scores.some((s) => s === null)) problems.push("a card rendered no score");
 
 console.log("local   :", before.localScored, "scored on load; away:", before.awayScored,
