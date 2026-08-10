@@ -207,7 +207,6 @@ Search by string, never by line number — line numbers move.
 | Rain gauge scoring radius | `var WX_MAX_MI` (tier 1), `var WX_TIER2_MI` (fallback) |
 | Rain gauge warning radius | `var WX_WATCH_MI` |
 | Soil probes we don't believe | `var SOIL_PROBE_BLOCK` |
-| Degraded-source line in the footer | `showDegraded` / `id="da-degraded"` |
 | Model handle for the review sheet | `window.ALTAR_MODEL` |
 | Cached payloads, keyed by trail | `var MODEL_RAWS` |
 
@@ -1033,7 +1032,7 @@ Three things this changes, in order of value:
 
 ## Hard constraints
 
-**Never remove the Open-Meteo attribution.** The footer link plus the note that scores are Altar's modification of their data are both required by CC BY 4.0. Non-negotiable.
+**Never remove the Open-Meteo attribution.** The footer link plus the note that scores are Altar's modification of their data are both required by CC BY 4.0. Non-negotiable. (10 Aug 2026: Matt asked to clear the footer of the "this is a model, not a trail report" disclaimer and the raw CLOUDS-quota error dump that `showDegraded()` used to write into `#da-degraded` — both removed, along with that now-unused function and element. This credit line is what's left, and it has to stay.)
 
 **Keep the other credits too.** NWS and USGS are US Government works and
 public domain, so their credit is courtesy rather than licence — but NC
