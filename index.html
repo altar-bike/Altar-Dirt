@@ -509,7 +509,35 @@ window.ALTAR_SETTINGS = {
     /* Singletracks GPS, 3580 Dry Creek Rd — 10.1 mi from the Summerville
        gauge (the 4-Aug scout's 1.1 mi was measured from the town). */
     { name: "Jarrod's Place",   place: "Summerville, GA",        lat: 34.5014, lon: -85.1625, soil: "rocky",    exposure: "exposed",
-      zone: "GAZ011", czone: "GAC055", gauge: "02398000",   gaugeMi: 10.1, away: true }
+      zone: "GAZ011", czone: "GAC055", gauge: "02398000",   gaugeMi: 10.1, away: true },
+    /* The three 6 Aug spots with no trustworthy public coordinate —
+       Matt sent Plus Codes 10 Aug 2026, resolved via Google Maps (source
+       cited per entry below). Soil/exposure are still his 6 Aug answers;
+       full history in CLAUDE.md under "New spots". */
+    /* Plus Code F757+8P, Candler NC -> Google Maps place page,
+       @35.4583125,-82.7356875. Stony Fork drains to Hominy Creek — the
+       right watershed, even though two USGS gauges sit closer but across
+       the ridge in the Pigeon River basin (same wrong-side-of-the-ridge
+       case as Big Ivy above). Distance is recomputed from this real pin,
+       not the 4-Aug town-center guess (was 6.0 mi from Candler's center;
+       is 10.6 mi from the actual spot). */
+    { name: "Stony Fork Park",  place: "Candler, NC",            lat: 35.4583, lon: -82.7357, soil: "loam",  exposure: "shaded",
+      zone: "NCZ053", czone: "NCC021", gauge: "0344878100", gaugeMi: 10.6 },
+    /* Plus Code F82R+W62, Mills River NC -> Google Maps place page,
+       @35.4522625,-82.6594844 — the pin lands right on the Blue Ridge
+       Parkway at Bent Creek Gap itself (BRP mp ~400), not just the
+       township. Mills River is the closer of the two nearby French
+       Broad-basin gauges and already carries real monthly medians. */
+    { name: "Bent Creek Gap",   place: "BRP mp 400, NC",         lat: 35.4523, lon: -82.6595, soil: "blend", exposure: "shaded",
+      zone: "NCZ065", czone: "NCC089", gauge: "03446000",   gaugeMi: 5.2 },
+    /* Plus Code JJ24+69, Swannanoa NC -> Google Maps place page,
+       @35.6005625,-82.3940625 (right-click on the pin confirms
+       35.600724,-82.394073). Beetree Creek is the closest active-IV
+       gauge — same Swannanoa River valley — and is new to GAUGES below;
+       its medians are real USGS day-of-year medians over a 100-year
+       record, not estimated. */
+    { name: "Beacon Park",      place: "Swannanoa, NC",          lat: 35.6006, lon: -82.3941, soil: "clay",  exposure: "exposed",
+      zone: "NCZ053", czone: "NCC021", gauge: "03450000",   gaugeMi: 3.7 }
   ];
 
   /* ==================================================================
@@ -543,7 +571,10 @@ window.ALTAR_SETTINGS = {
     "03463300":   { name: "South Toe River nr Celo",         por: "", med: null },
     "021623957":  { name: "Big Falls Creek nr Tigerville SC", por: "", med: null },
     "03469251":   { name: "W Prong Little Pigeon nr Gatlinburg", por: "", med: null },
-    "02398000":   { name: "Chattooga River at Summerville GA", por: "", med: null }
+    "02398000":   { name: "Chattooga River at Summerville GA", por: "", med: null },
+    /* Added 10 Aug 2026 for Beacon Park. Real day-of-year medians from
+       USGS (100-year period of record) — not estimated. */
+    "03450000":   { name: "Beetree Creek nr Swannanoa",       por: "1926–2026", med: {1:11,2:12,3:14,4:13.5,5:9.7,6:5.8,7:4,8:3.2,9:2.6,10:3,11:4.8,12:8.1} }
   };
 
   /* Settings come from the SETTINGS block at the top of this file. */
