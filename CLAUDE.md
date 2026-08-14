@@ -667,8 +667,16 @@ Station selection is unchanged: closest wins, ties inside 2 miles break
 downhill. With USCRN in the pool, **Bent Creek now reads from Asheville
 8 SSW at 0.8 miles** instead of FLET at 6.
 
-`CLOUDS_LOC` and `CLOUDS_WX_LOC` env vars control which networks and
-counties are queried, if the sensor set needs widening.
+`CLOUDS_LOC`, `CLOUDS_WX_LOC` and `CLOUDS_COCO_LOC` env vars control
+which networks and counties are queried, if the sensor set needs
+widening — and a value set in Railway WINS over the code default, so
+check Railway's variables before assuming an edit to `server.js` took.
+Selector rules from the CLOUDS maintainer (14 Aug 2026): no lat/lon
+bounding boxes; scope by `county` (bare names, **`state=NC` required**
+— nine of our fourteen county names exist in other states, and the
+unqualified list was live-confirmed pulling two Polk County TN
+stations), or by `nws_cwa` (GSP,RNK covers us, plus out-of-state
+edges), or by `climdiv` (NC01,NC02).
 
 **The Bent Creek miss, 4 Aug 2026 — read this before trusting a score.**
 Matt said it looked like it had rained at Bent Creek. It had: the USCRN
@@ -770,7 +778,7 @@ not estimate them.
 appear in `index.html` — the page calls our `/soil` proxy instead.
 CLOUDS also sends no CORS headers, so a proxy is required regardless.
 
-- `GET /soil` — cached 20 min, returns `{stations:[…]}`; the page picks
+- `GET /soil` — cached 60 min, returns `{stations:[…]}`; the page picks
   the nearest station within 45 miles that actually reported. Returns
   an empty list rather than an error when the key is missing or CLOUDS
   is down, so the page degrades to nothing.
@@ -780,7 +788,22 @@ CLOUDS also sends no CORS headers, so a proxy is required regardless.
   varies its nesting; if station readings stop appearing, compare
   `/soil/raw` against the parser before assuming the API broke.
 - Endpoint is `api.climate.ncsu.edu/data.php`; variables are
-  `soilmoist`, `soilmoist20cm` (m³/m³) and `soiltemp` (°F).
+  `soilmoist` (m³/m³) and `soiltemp` (°F). `soilmoist20cm` was dropped
+  14 Aug 2026 on the maintainer's guidance: CLOUDS strips depth/height
+  when serving a "standard or close to standard" value, so `soilmoist`
+  already returns each network's one standard reading and the second
+  name was the same number twice (byte-identical for all 45 reporting
+  stations on the 14 Aug payload — the 0246CA finding below, confirmed
+  fleet-wide).
+- **Quota is counted in datapoints, not requests.** Public tier is
+  300,000/month; the 5-6 Aug outage was this account at 300,655. NCSU
+  (John McGuire) raised it to 600,000 temporarily on 10 Aug 2026 —
+  budget against 300k so the bump's expiry is a non-event. The -3-day
+  hourly wx series is ~91% of every refresh; the 14 Aug scoping cut
+  ~10% of the total (the soil query's own cost fell ~5/6, and the two
+  Polk County TN gauges came off the hourly wx series). If the budget
+  binds again the levers are sensor-plan 0b's wx delta-fetch or
+  dropping `evaptrans_pm` (display-only, halves the wx cost).
 
 **Never inspect `/soil` through `WebFetch`.** It is ~70 KB and WebFetch
 silently truncates it, so what comes back is a well-formed-looking
@@ -818,13 +841,18 @@ slow no longer takes the others with it. It is not a truncation guard.
 
 `/soil` carries a `dropped` array when a station has readings but no
 coordinates (so it cannot be matched to a trail) or when a whole network
-query throws. Absent or empty `dropped` plus a plausible `wx.length` is
-the check to run after any change to `CLOUDS_LOC` or `CLOUDS_WX_LOC`. As
-of 4 Aug 2026 it has never been non-empty.
+query throws. Absent or empty `dropped` plus a plausible `wx.length`
+and a non-empty `coco` is the check to run after any change to
+`CLOUDS_LOC`, `CLOUDS_WX_LOC` or `CLOUDS_COCO_LOC`. As of 4 Aug 2026 it
+has never been non-empty. After the 14 Aug 2026 county scoping the
+plausible numbers are: stations ~12-15 (was 48 statewide), wx ~22 (was
+24 — the two Polk County TN strays are gone on purpose), coco ~70+.
 
-**Cold `/soil` is slow; warm `/soil` is not.** The payload now costs five
-upstream CLOUDS calls (three soil networks split by `locVariants`, the
-rain feed, plus CoCoRaHS) so the first request after a deploy can take
+**Cold `/soil` is slow; warm `/soil` is not.** The payload costs six
+upstream CLOUDS data calls per refresh (CLOUDS_LOC splits into ECONET +
+USCRN, CLOUDS_WX_LOC into RAWS + USCRN + ECONET, plus one CoCoRaHS
+query), and a truly cold boot adds up to six 24h-cached meta lookups
+on top, so the first request after a deploy can take
 long enough to time out a client — it did twice on 4 Aug. Once
 `soilCache` fills it serves in ~10ms and the page paints measured scores
 about a second after load, with no visible forecast-only flash. So don't
@@ -871,8 +899,17 @@ separately for `0246CA`, CLOUDS returns byte-identical values under both
 names (24.9, 25.6 at the same timestamps). It aliases one probe to both
 variable names. So we have ONE depth, we do not know which, and the
 card's "at 20cm" label is inferred from which key came back non-null —
-it is not a claim CLOUDS supports. `normaliseMoisture` and the
-surface/20cm branch in `measuredHtml` are both built on this assumption.
+it is not a claim CLOUDS supports.
+
+**Resolved 14 Aug 2026.** The CLOUDS maintainer confirmed the aliasing
+is by design — depth/height is dropped when serving a "standard or
+close to standard" value, and `soilmoist` alone returns both networks'
+standard readings — and a live check found the two names byte-identical
+for all 45 reporting stations, not just 0246CA. `soilmoist20cm` is out
+of `SOIL_VARS`, the payload no longer carries the field, and the card
+now says "% water in the soil" with no depth claim at all. The
+underlying caveat stands: the depth is unknown, so don't reintroduce
+one.
 
 **2. ~~FLET is flatlined.~~ WRONG — retracted the same evening.** I saw
 FLET hold exactly `0.44` for thirty hours, concluded the probe was stuck,
@@ -888,9 +925,11 @@ window. The sensors are fine and the irrigated-research-farm explanation
 for FLET's wetness stands.
 
 Reverted. Staleness is now judged on the reading's own **timestamp**
-(`STALE_HOURS = 6`), which is the question actually being asked and
-cannot be fooled by precision. `/soil` reports `ageHours` per station
-and lists genuinely stale ones in `stale`.
+(`STALE_HOURS`, 8 hours behind the freshest station in the payload as
+of 14 Aug 2026 — the constant in `server.js` is truth if this drifts),
+which is the question actually being asked and cannot be fooled by
+precision. `/soil` reports `behindHours` per station and lists
+genuinely stale ones in `stale`.
 
 The lesson, which is the same one as the WebFetch truncation earlier the
 same evening: **when a detector fires on many subjects at once, suspect
