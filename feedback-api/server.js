@@ -146,7 +146,13 @@ function rateLimited(ip) {
      CLOUDS_HASH  the hash from api.climate.ncsu.edu. Without it
                   /soil returns an empty station list and the page
                   simply shows no station readings.
-     CLOUDS_LOC   station selector, default "type=ECONET;state=NC".
+     CLOUDS_LOC   soil-station selector; CLOUDS_WX_LOC and
+                  CLOUDS_COCO_LOC override the other two feeds the
+                  same way. Selector format rules live at the
+                  defaults below. A value set as a Railway variable
+                  WINS over the code default — which is exactly how
+                  a stale variable can silently undo an edit here,
+                  so check Railway's variables before editing these.
    ============================================================ */
 
 const CLOUDS_URL = "https://api.climate.ncsu.edu/data.php";
@@ -155,9 +161,27 @@ const CLOUDS_HASH = process.env.CLOUDS_HASH || "";
 /* Soil sensors. USCRN is the US Climate Reference Network — research
    grade, and one of its sites sits 0.8 miles from Bent Creek, far
    closer than any ECONet station. Note the units differ between the
-   two networks; normaliseMoisture() below handles that. */
-const CLOUDS_LOC = process.env.CLOUDS_LOC || "type=ECONET,USCRN;state=NC";
-const SOIL_VARS = ["soilmoist", "soilmoist20cm", "soiltemp"];
+   two networks; normaliseMoisture() below handles that.
+
+   Scoped 14 Aug 2026 from all of NC down to the fourteen trail
+   counties, on the CLOUDS maintainer's guidance (format note above
+   CLOUDS_WX_LOC below). Checked against the live payload first:
+   every station any trail actually matched was already inside these
+   counties, so the ~35 statewide stations this drops were pure
+   datapoint cost.
+
+   soilmoist20cm came OUT of the var list the same day, same source:
+   CLOUDS drops depth/height when serving a "standard or close to
+   standard" value, so `soilmoist` already carries each network's one
+   standard soil-moisture reading and the second name was the same
+   number twice — byte-identical for all 45 reporting stations on the
+   14 Aug payload, matching the 0246CA finding in CLAUDE.md. One var
+   fewer is a third off the soil query's datapoint cost. */
+const CLOUDS_LOC = process.env.CLOUDS_LOC ||
+  "type=ECONET,USCRN;state=NC;county=Transylvania,Henderson,Buncombe," +
+  "Haywood,Madison,Burke,Caldwell,Yancey,McDowell,Polk,Avery,Watauga," +
+  "Mitchell,Rutherford";
+const SOIL_VARS = ["soilmoist", "soiltemp"];
 
 /* Measured weather. RAWS fire-weather stations carry no soil moisture
    but do carry a real rain gauge and Penman-Monteith evapotranspiration,
@@ -174,11 +198,21 @@ const SOIL_VARS = ["soilmoist", "soilmoist20cm", "soiltemp"];
    ECONet is in here for the same reason — it reports `precip` as well as
    soil, and on the afternoon of 4 Aug 2026 UNCA read 0.21 in while the
    gauges nearest Pisgah and Mills River read 0.01 and 0.00. Three
-   networks, one query; a rain gauge is a rain gauge. */
+   networks, one query; a rain gauge is a rain gauge.
+
+   Selector format, per the CLOUDS maintainer (14 Aug 2026): bare
+   county names, and state=NC is REQUIRED beside them — county names
+   collide across states, and this exact list without state=NC was
+   live-confirmed pulling two Polk County TENNESSEE stations (BOCT1,
+   DLOT1) that no trail ever used. Every value returned costs quota,
+   so that was rent paid on dirt nobody rides. CLOUDS has no lat/lon
+   bounding boxes; the scoping options are county, nws_cwa (GSP,RNK
+   would cover this list, plus out-of-state edges) and climdiv
+   (NC01,NC02). */
 const CLOUDS_WX_LOC = process.env.CLOUDS_WX_LOC ||
-  "type=RAWS,USCRN,ECONET;county=Transylvania County,Henderson County,Buncombe County," +
-  "Haywood County,Madison County,Burke County,Caldwell County,Yancey County,McDowell County," +
-  "Polk County,Avery County,Watauga County,Mitchell County,Rutherford County";
+  "type=RAWS,USCRN,ECONET;state=NC;county=Transylvania,Henderson,Buncombe," +
+  "Haywood,Madison,Burke,Caldwell,Yancey,McDowell,Polk,Avery,Watauga," +
+  "Mitchell,Rutherford";
 const WX_VARS = ["precip", "evaptrans_pm"];
 
 /* CoCoRaHS: volunteer daily rain gauges — a tube in somebody's garden,
@@ -188,18 +222,33 @@ const WX_VARS = ["precip", "evaptrans_pm"];
    0.8 mi out where its nearest hourly gauge is 6 mi; Hatley's best is
    7.2 mi where hourly offers nothing under 10. Scoped to the counties
    holding (or about to hold) such trails, not the full mountain list —
-   observers are dense and every one of these rows ships to the page. */
+   observers are dense and every one of these rows ships to the page.
+   Same selector format rules as CLOUDS_WX_LOC above — CoCoRaHS is
+   nationwide-dense, so an unqualified county name is the worst bleed
+   risk of the three feeds. */
 const CLOUDS_COCO_LOC = process.env.CLOUDS_COCO_LOC ||
-  "type=COCORAHS;county=Henderson County,Madison County,Buncombe County," +
-  "McDowell County,Yancey County,Caldwell County";
+  "type=COCORAHS;state=NC;county=Henderson,Madison,Buncombe," +
+  "McDowell,Yancey,Caldwell";
 
 /* Both networks publish hourly, so polling faster than hourly buys
-   nothing — and CLOUDS quota is the binding constraint: the public tier
-   allows 2,000 requests/month and this service fires six per refresh.
-   At the old 20-minute TTL that is ~13,000/month, which is the likely
-   cause of the 5-6 Aug 2026 outage where every query dropped for hours.
-   60 minutes = ~4,300/month. Still over if traffic is steady — the real
-   fix is a higher CLOUDS tier (email NCSCO), but this triples headroom. */
+   nothing — and CLOUDS quota is the binding constraint. The quota that
+   actually bit is counted in DATAPOINTS (values returned), not
+   requests: the public tier is 300,000/month, the 5-6 Aug 2026 outage
+   was this account hitting 300,655, and on 10 Aug NCSU raised us to
+   600,000 temporarily ("the next month or so") while the queries got
+   slimmer. Budget against 300k so the bump's expiry is a non-event.
+   (An earlier version of this comment budgeted against a 2,000
+   requests/month figure; the error text that actually arrived counts
+   datapoints, so that is the number that matters.)
+
+   Where a refresh's datapoints actually go: the -3-day hourly wx
+   series is ~91% of every refresh (~22 gauges x 2 vars x ~72 hours).
+   The 14 Aug scoping cut the soil query by ~5/6 and took the two
+   Tennessee strays off that hourly wx series — ~10% of the total,
+   combined. If the budget binds again, the real levers are a
+   delta-fetch on the wx window (sensor-plan 0b: fetch the new hours,
+   remember the rest) or dropping evaptrans_pm (display-only, halves
+   the wx cost). */
 const SOIL_TTL = 60 * 60 * 1000;
 /* How long to sit on a FAILED harvest before trying upstream again.
    Long enough not to hammer a struggling API, short enough that the
@@ -343,7 +392,7 @@ async function cloudsJson(url) {
 
    It is kept because it earns its place for a different reason: one
    network being down or slow no longer costs us the other two. That is
-   worth three cheap requests every twenty minutes. It is NOT a truncation
+   worth three cheap requests per refresh. It is NOT a truncation
    guard, and nothing here should be taken as evidence CLOUDS truncates.
    `dropped` on the /soil payload is the actual guard, and as of writing
    it has never been non-empty. */
@@ -816,7 +865,6 @@ async function soilHarvest() {
       lon: d.lon != null ? d.lon : (m.lon != null ? m.lon : null),
       elev: d.elev != null ? d.elev : (m.elev != null ? m.elev : null),
       soilmoist: dead ? null : normaliseMoisture(d.soilmoist),
-      soilmoist20cm: dead ? null : normaliseMoisture(d.soilmoist20cm),
       soiltemp: dead || d.soiltemp == null ? null : d.soiltemp,
       at: d.at || null,
       /* hours behind the freshest station in this payload, not wall-clock age */
@@ -824,7 +872,7 @@ async function soilHarvest() {
     };
   }).filter(function (s) {
     return s.lat != null && s.lon != null &&
-      (s.soilmoist != null || s.soilmoist20cm != null || s.soiltemp != null);
+      (s.soilmoist != null || s.soiltemp != null);
   });
 
   /* Measured weather is a bonus — never fail the soil payload over it. */
