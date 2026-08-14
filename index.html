@@ -1221,7 +1221,9 @@ window.ALTAR_SETTINGS = {
      sites is kept — only the moisture sensor is dropped.
 
      FLET (Mtn Horticultural Crops Research Stn) read 44% volumetric water
-     at both 10cm and 20cm on 5 Aug 2026 having caught 0.26" of rain in
+     at both 10cm and 20cm on 5 Aug 2026 (the two var names were later
+     confirmed to be one aliased reading, so "both depths" was really
+     one sensor twice) having caught 0.26" of rain in
      72 hours, while 0246CA — which caught 0.93", nearly four times as
      much — read 24%. Every forest and fire station in range sat at
      24–29%; the only sites reading 40–49% were FLET, WAYN (also a
@@ -1354,7 +1356,7 @@ window.ALTAR_SETTINGS = {
     var pool = [];
     EXTRA.stations.forEach(function (s) {
       if (s.lat == null || s.lon == null) return;
-      if (s.soilmoist == null && s.soilmoist20cm == null) return;
+      if (s.soilmoist == null) return;
       if (t.station) { if (s.id !== t.station) return; }
       var mi = milesBetween(t.lat, t.lon, s.lat, s.lon);
       if (!t.station && mi > 45) return;
@@ -1493,7 +1495,7 @@ window.ALTAR_SETTINGS = {
      0.27; the station says what the dirt is actually doing. */
   function stationMeaning(s, m) {
     var out = [];
-    var sm = s.soilmoist20cm != null ? s.soilmoist20cm : s.soilmoist;
+    var sm = s.soilmoist;
     if (sm != null) {
       if (sm > 0.27)      out.push("Station dirt is wetter than the tacky band.");
       else if (sm < 0.11) out.push("Station dirt is under the tacky band. Loose over hard.");
@@ -1591,9 +1593,12 @@ window.ALTAR_SETTINGS = {
     var st = nearestStation(t);
     if (st) {
       var s = st.s, p = [];
-      var sm = s.soilmoist20cm != null ? s.soilmoist20cm : s.soilmoist;
-      var depth = s.soilmoist20cm != null ? "20cm" : "surface";
-      if (sm != null) p.push(r0(sm * 100) + "% water at " + depth);
+      /* No depth claim on the reading: CLOUDS serves each network's one
+         standard-depth value with the depth deliberately dropped (its
+         maintainer, Aug 2026), so the old "at 20cm" label was never a
+         claim CLOUDS supported. */
+      var sm = s.soilmoist;
+      if (sm != null) p.push(r0(sm * 100) + "% water in the soil");
       if (s.soiltemp != null) p.push(r0(s.soiltemp) + "°F soil");
       if (p.length) {
         var where = st.mi.toFixed(0) + " mi";
