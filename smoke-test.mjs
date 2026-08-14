@@ -91,7 +91,7 @@ for (let i = 0; i <= NOW; i++) {
 }
 const soilPayload = {
   stations: [{ id: "TEST", name: "Test Soil Station", lat: 35.4950, lon: -82.6300,
-               elev: 2100, soilmoist: 0.31, soilmoist20cm: 0.31, soiltemp: 68, at: iso(NOW) }],
+               elev: 2100, soilmoist: 0.31, soiltemp: 68, at: iso(NOW) }],
   wx: [{ id: "TESTG", name: "Test Rain Gauge", lat: 35.4950, lon: -82.6300,
          elev: 2100, hours: gaugeHours }],
   /* A volunteer daily observer 1 mi from Ride Kanuga, dated with the
