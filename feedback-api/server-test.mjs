@@ -34,11 +34,17 @@ const eq = (label, got, want) => {
   if (a !== b) problems.push(label + "\n  got  " + a + "\n  want " + b);
 };
 
-eq("three networks split into three queries, county list preserved",
-  locVariants("type=RAWS,USCRN,ECONET;county=Transylvania County,Henderson County"),
-  ["type=RAWS;county=Transylvania County,Henderson County",
-   "type=USCRN;county=Transylvania County,Henderson County",
-   "type=ECONET;county=Transylvania County,Henderson County"]);
+eq("three networks split into three queries, state and county list preserved",
+  locVariants("type=RAWS,USCRN,ECONET;state=NC;county=Transylvania,Henderson"),
+  ["type=RAWS;state=NC;county=Transylvania,Henderson",
+   "type=USCRN;state=NC;county=Transylvania,Henderson",
+   "type=ECONET;state=NC;county=Transylvania,Henderson"]);
+
+/* The live selectors moved to this format 14 Aug 2026 (bare county
+   names + a required state=NC, per the CLOUDS maintainer). The old
+   "Transylvania County" long form still splits fine — locVariants
+   copies every non-type segment opaquely — this fixture just mirrors
+   what production actually sends now. */
 
 eq("two networks, statewide",
   locVariants("type=ECONET,USCRN;state=NC"),
