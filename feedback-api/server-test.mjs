@@ -121,6 +121,77 @@ if (!parsed) {
 }
 
 /* ---------------------------------------------------------------
+   The wx delta-fetch helpers (15 Aug 2026). The store logic is what
+   keeps a 72-hour rain window honest while fetching only new hours —
+   every mistake here either loses measured rain or refetches the
+   world. All pure, all lifted from the shipping file.
+   --------------------------------------------------------------- */
+const wxFetchHours = lift("wxFetchHours");
+{
+  const H = 3600000, now = 1755300000000;
+
+  eq("cold store fetches the full window", wxFetchHours(0, now, 72, 2), 72);
+  eq("fresh store fetches the minimum overlap window",
+    wxFetchHours(now - 30 * 60000, now, 72, 2), 3);
+  eq("an 8-hour quiet gap is re-covered with overlap",
+    wxFetchHours(now - 8 * H, now, 72, 2), 10);
+  eq("a gap wider than the window is capped at the window",
+    wxFetchHours(now - 100 * H, now, 72, 2), 72);
+}
+
+const hourKeyMs = lift("hourKeyMs");
+eq("hour key parses to a stable axis", hourKeyMs("2026-08-15T13"), Date.UTC(2026, 7, 15, 13));
+eq("malformed key is rejected, not guessed", hourKeyMs("2026-08-15 13:00"), null);
+
+const mergeHours = lift("mergeHours");
+eq("merge keeps old rows and lets fresh rows win",
+  mergeHours({ a: { p: 0.1, et: 0.01 }, b: { p: 0, et: 0 } },
+             { b: { p: 0.2, et: 0.01 }, c: { p: 0.3, et: null } }),
+  { a: { p: 0.1, et: 0.01 }, b: { p: 0.2, et: 0.01 }, c: { p: 0.3, et: null } });
+eq("merge tolerates an absent old side", mergeHours(null, { a: { p: 1, et: null } }), { a: { p: 1, et: null } });
+eq("a null marker retracts the stored hour instead of preserving it",
+  mergeHours({ a: { p: 1.22, et: 0.01 }, b: { p: 0, et: 0 } }, { a: null }),
+  { b: { p: 0, et: 0 } });
+
+const pruneHoursBefore = lift("pruneHoursBefore");
+{
+  const cutoff = Date.UTC(2026, 7, 12, 14);   /* 72h before 15 Aug 14:00 */
+  const kept = pruneHoursBefore({
+    "2026-08-12T13": { p: 0.5, et: null },    /* one hour too old — goes */
+    "2026-08-12T14": { p: 0.2, et: null },    /* exactly at the cutoff — stays */
+    "2026-08-15T14": { p: 0, et: 0.01 },      /* newest — stays */
+    "garbage": { p: 9, et: 9 }                /* malformed — goes */
+  }, cutoff);
+  eq("prune drops old and malformed keys, keeps the boundary",
+    Object.keys(kept).sort(), ["2026-08-12T14", "2026-08-15T14"]);
+}
+
+/* parseWxHours reads through numOf/unwrap; lift them first so the
+   eval'd function finds them on this module's scope chain. */
+const numOf = lift("numOf");
+const unwrap = lift("unwrap");
+const parseWxHours = lift("parseWxHours");
+{
+  const rows = parseWxHours({
+    "2026-08-15 13:00:00": { precip: { value: "0.12" }, evaptrans_pm: { value: "0.254" } },
+    "2026-08-15 14:00:00": { precip: { value: "MV" }, evaptrans_pm: { value: "" } },
+    "2026-08-15 15:00:00": "not-an-object",
+    "2026-08-15 16:00:00": {}
+  });
+  eq("wx rows parse to local-hour keys, ET mm->in, valueless rows become retraction markers",
+    rows, { "2026-08-15T13": { p: 0.12, et: 0.01 }, "2026-08-15T14": null });
+  /* a retraction marker must actually retract */
+  eq("a parsed retraction deletes the stored hour end to end",
+    mergeHours({ "2026-08-15T14": { p: 1.22, et: null } }, rows)["2026-08-15T14"], undefined);
+}
+
+const minutesOr = lift("minutesOr");
+eq("unset TTL env falls back to the default", minutesOr(undefined, 60), 3600000);
+eq("garbage TTL env falls back to the default", minutesOr("soon", 5), 300000);
+eq("a real TTL override is honored", minutesOr("2", 60), 120000);
+eq("zero and negatives are refused, not obeyed", minutesOr("0", 5), 300000);
+
+/* ---------------------------------------------------------------
    milesBetween — every gauge threshold in the page depends on it.
    --------------------------------------------------------------- */
 const milesBetween = lift("milesBetween");
@@ -135,4 +206,5 @@ if (problems.length) {
 }
 console.log("parsed " + (parsed ? parsed.length : 0) + " trails from index.html: " +
   (parsed || []).map((t) => t.name).join(", "));
-console.log("PASS — locVariants, parseTrails, normaliseMoisture, milesBetween");
+console.log("PASS — locVariants, parseTrails, normaliseMoisture, milesBetween, " +
+  "wxFetchHours, hourKeyMs, mergeHours, pruneHoursBefore, parseWxHours, minutesOr");
