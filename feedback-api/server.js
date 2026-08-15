@@ -153,6 +153,10 @@ function rateLimited(ip) {
                   WINS over the code default — which is exactly how
                   a stale variable can silently undo an edit here,
                   so check Railway's variables before editing these.
+     SOIL_TTL_MIN / SOIL_FAIL_TTL_MIN / COCO_TTL_MIN
+                  cache lifetimes in minutes (defaults 60 / 5 / 360).
+                  Env-tunable so a live delta-fetch check can shorten
+                  the TTL for a few minutes without a code change.
    ============================================================ */
 
 const CLOUDS_URL = "https://api.climate.ncsu.edu/data.php";
@@ -241,19 +245,36 @@ const CLOUDS_COCO_LOC = process.env.CLOUDS_COCO_LOC ||
    requests/month figure; the error text that actually arrived counts
    datapoints, so that is the number that matters.)
 
-   Where a refresh's datapoints actually go: the -3-day hourly wx
-   series is ~91% of every refresh (~22 gauges x 2 vars x ~72 hours).
-   The 14 Aug scoping cut the soil query by ~5/6 and took the two
-   Tennessee strays off that hourly wx series — ~10% of the total,
-   combined. If the budget binds again, the real levers are a
-   delta-fetch on the wx window (sensor-plan 0b: fetch the new hours,
-   remember the rest) or dropping evaptrans_pm (display-only, halves
-   the wx cost). */
-const SOIL_TTL = 60 * 60 * 1000;
+   Where a refresh's datapoints go since 15 Aug 2026 (the delta-fetch):
+   the wx series keeps its 3-day window IN MEMORY and asks CLOUDS only
+   for the hours since the last successful fetch (+2h of overlap for
+   late revisions), so a warm hourly refresh costs ~22 gauges x 2 vars
+   x 3 hours ≈ 130 datapoints where the old full re-pull cost ~3,170.
+   A cold boot still pays one full 72-hour pull per network. CoCoRaHS
+   is cached for COCO_TTL (default 6h — hand-read morning gauges gain
+   nothing from hourly refetching) over a -2 day window. Worst case at
+   full traffic is now ~5k datapoints/day (~150k/month), inside the
+   public tier with room to spare; before the delta it was ~87k/day.
+   Degraded mode has its own bound: a soil-station outage retries on
+   the 5-minute fail TTL, but WX_MIN_INTERVAL floors the wx rounds at
+   20 minutes, so even that mode stays near ~10k/day rather than
+   re-polling rain every retry. */
+
+/* Minutes -> ms with a default, tolerant of unset/garbage env values.
+   Pure so the tests can lift it. */
+function minutesOr(raw, defMin) {
+  const n = parseFloat(raw);
+  return (isFinite(n) && n > 0 ? n : defMin) * 60 * 1000;
+}
+const SOIL_TTL = minutesOr(process.env.SOIL_TTL_MIN, 60);
 /* How long to sit on a FAILED harvest before trying upstream again.
    Long enough not to hammer a struggling API, short enough that the
    page is not stuck with a bad payload for a full hour. */
-const SOIL_FAIL_TTL = 5 * 60 * 1000;
+const SOIL_FAIL_TTL = minutesOr(process.env.SOIL_FAIL_TTL_MIN, 5);
+/* CoCoRaHS observers read a tube once each morning; refetching their
+   daily totals every soil refresh was rent paid on data that changes
+   once a day. */
+const COCO_TTL = minutesOr(process.env.COCO_TTL_MIN, 360);
 
 let soilCache = { at: 0, ttl: 0, payload: null };
 let soilGood = null;       /* last harvest that actually carried data */
@@ -422,12 +443,16 @@ async function stationMeta(loc, vars) {
        24 hours, which dropped every gauge in the network as ":nocoords"
        for a day. Coordinates change ~never: on failure, serve the old
        map if we have one and leave the cache alone so the next call
-       retries upstream. */
-    if (hit) return hit.byId;
+       retries upstream. On a COLD failure — nothing cached yet, i.e.
+       every process boot — cache nothing at all: the old fall-through
+       banked an empty map stamped fresh, which would have blanked every
+       rain gauge for 24 hours after any boot-time blip (found in review
+       15 Aug 2026, latent since this cache existed). */
+    return hit ? hit.byId : {};
   }
-  /* Same guard for a 200 that harvests nothing: never replace a
-     populated map with an empty one. */
-  if (!Object.keys(out).length && hit && Object.keys(hit.byId).length) return hit.byId;
+  /* Same guard for a 200 that harvests nothing: never bank an empty
+     map, cold or warm. */
+  if (!Object.keys(out).length) return hit ? hit.byId : out;
   metaCache[loc] = { at: Date.now(), byId: out };
   return out;
 }
@@ -441,56 +466,242 @@ function normaliseMoisture(v) {
 }
 
 /* Hourly rain and evapotranspiration from the fire-weather stations.
-   Three days back is exactly what the page's water balance needs to
-   rebuild its store from measured rather than forecast rain. */
+   The page's water balance needs three days of measured rain — but the
+   only NEW information each refresh is the last hour or two. Since
+   15 Aug 2026 the 72-hour window lives in memory (wxStore) and each
+   refresh asks CLOUDS only for the hours since the last successful
+   fetch, +2h of overlap so late upstream revisions still land. That is
+   the difference between ~3,170 datapoints per refresh and ~130.
+
+   The store is process memory: a deploy or restart empties it and the
+   next harvest pays one full 72-hour pull per network (the boot-time
+   grading run does this within a minute of every deploy). The fetch
+   cursor is PER NETWORK, so one network erroring keeps its own cursor
+   parked and re-covers its gap on the next refresh without forcing the
+   healthy networks to refetch anything. Side effect worth having: a
+   gauge that skips a report or a network that drops out keeps serving
+   its stored hours (honestly aged — the page already words rain as
+   "ended Nh ago"), instead of vanishing from the payload for an hour
+   the way the full re-pull made it. Stored hours age out against the
+   FLEET'S newest reading, data time not wall clock, same reasoning as
+   the staleness check below. */
+const WX_WINDOW_H = 72;
+const WX_OVERLAP_H = 2;
+/* Floor between upstream wx rounds: the 5-minute fail-TTL retry loop
+   exists to heal the soil queries, not to re-poll rain fetched minutes
+   ago. Env-tunable (WX_MIN_INTERVAL_MIN) so a live check can shrink it. */
+const WX_MIN_INTERVAL = minutesOr(process.env.WX_MIN_INTERVAL_MIN, 20);
+let wxStore = {
+  fetchedAt: {},    /* per loc variant: wall time its newest DATA hour last advanced */
+  newestKey: {},    /* per loc variant: that newest hour key */
+  seenIds: {},      /* every station id ever seen in a response (backfill trigger) */
+  byId: {},         /* per station: { hours } */
+  lastFetchMs: 0    /* wall time of the last round that reached upstream */
+};
+
+/* Hours to request for one network, given when IT last succeeded.
+   Window/overlap ride in as parameters so the tests can lift this
+   standalone; the call site below passes the constants. */
+function wxFetchHours(fetchedAtMs, nowMs, windowH, overlapH) {
+  if (!fetchedAtMs) return windowH;
+  const gapH = Math.ceil((nowMs - fetchedAtMs) / 3600000);
+  return Math.max(1 + overlapH, Math.min(windowH, gapH + overlapH));
+}
+
+/* "YYYY-MM-DDTHH" -> ms on a consistent axis. CLOUDS keys are local
+   time with no zone, but every station shares the same zone, so
+   treating components as UTC linearizes them consistently. */
+function hourKeyMs(k) {
+  const m = String(k).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2})$/);
+  return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4]) : null;
+}
+
+/* Fresh rows win on collision — upstream revisions are the truth. A
+   fresh row of `null` is a RETRACTION marker from parseWxHours (CLOUDS
+   QC nulled a value it had published): delete the stored hour rather
+   than keep serving rain the network has withdrawn. */
+function mergeHours(oldHours, newHours) {
+  const out = {};
+  for (const k of Object.keys(oldHours || {})) out[k] = oldHours[k];
+  for (const k of Object.keys(newHours || {})) {
+    if (newHours[k] === null) delete out[k];
+    else out[k] = newHours[k];
+  }
+  return out;
+}
+
+/* Keep only hour keys at or after the cutoff; malformed keys go. */
+function pruneHoursBefore(hours, cutoffMs) {
+  const out = {};
+  for (const k of Object.keys(hours || {})) {
+    const ms = hourKeyMs(k);
+    if (ms !== null && ms >= cutoffMs) out[k] = hours[k];
+  }
+  return out;
+}
+
+/* One station's CLOUDS rows -> {"YYYY-MM-DDTHH": {p, et}}. Unchanged
+   parsing since 4 Aug, just liftable now. */
+function parseWxHours(byTime) {
+  const hours = {};
+  if (!byTime || typeof byTime !== "object") return hours;
+  for (const t of Object.keys(byTime)) {
+    const rec = byTime[t];
+    if (!rec || typeof rec !== "object") continue;
+    const p = numOf(unwrap(rec.precip));
+    /* CLOUDS serves Penman-Monteith ET in MILLIMETERS while precip
+       on the same feed is inches (verified against forecasts and a
+       hand-read gauge on 5 Aug 2026). Unconverted, FLET showed
+       "4.15 in evaporated in 24h" — impossible in inches, ordinary
+       in mm. Convert here so the card and the ratings CSV both get
+       inches. If a station ever really does report inches this
+       makes it read 25x low, which is visible; the reverse error
+       read 25x high for a month and looked like a broken sensor. */
+    const etRaw = numOf(unwrap(rec.evaptrans_pm));
+    const et = etRaw === null ? null : etRaw / 25.4;
+    /* key by local hour so it lines up with Open-Meteo's timestamps */
+    const s = String(t);
+    const key = s.slice(0, 10) + "T" + s.slice(11, 13);
+    if (p === null && et === null) {
+      /* The fields are PRESENT but carry no value: that is a row CLOUDS
+         has nulled after publishing (QC retraction). Mark it so
+         mergeHours deletes the stored hour. A row without the fields at
+         all stays a plain skip — absence is not a retraction. */
+      if ("precip" in rec || "evaptrans_pm" in rec) hours[key] = null;
+      continue;
+    }
+    hours[key] = { p: p, et: et };
+  }
+  return hours;
+}
+
 async function wxSeries(dropped) {
-  const out = [], seen = {};
+  const nowMs = Date.now();
+  /* Within the floor of the last round that reached upstream, serve the
+     store untouched — a station-outage retry loop should not turn into
+     a rain-polling loop. */
+  if (wxStore.lastFetchMs && nowMs - wxStore.lastFetchMs < WX_MIN_INTERVAL) {
+    return wxPayload(dropped);
+  }
+  const askLog = [];
+  let reachedUpstream = false;
   for (const loc of locVariants(CLOUDS_WX_LOC)) {
+    const label = loc.split(";")[0].replace("type=", "");
+    let askH = wxFetchHours(wxStore.fetchedAt[loc], nowMs, WX_WINDOW_H, WX_OVERLAP_H);
     let j;
-    /* One network being down must not cost us the other two. */
+    /* One network being down must not cost us the other two — and its
+       own cursor stays parked so its gap is re-covered next time. */
     try {
       j = await cloudsJson(cloudsUrl({
         loc: loc, var: WX_VARS.join(","),
-        start: "-3 days", end: "now", int: "1 hour", obtype: "H"
+        start: "-" + askH + " hours", end: "now", int: "1 hour", obtype: "H"
       }));
-    } catch (e) { if (dropped) dropped.push("query:" + loc.split(";")[0] + ":" + String(e.message || e).slice(0, 240)); continue; }
-    const data = j.data || {};
-    const meta = await stationMeta(loc, WX_VARS.join(","));
-    for (const id of Object.keys(data)) {
-      if (seen[id]) continue;
-      const byTime = data[id];
-      if (!byTime || typeof byTime !== "object") continue;
-      const hours = {};
-      let n = 0;
-      for (const t of Object.keys(byTime)) {
-        const rec = byTime[t];
-        if (!rec || typeof rec !== "object") continue;
-        const p = numOf(unwrap(rec.precip));
-        /* CLOUDS serves Penman-Monteith ET in MILLIMETERS while precip
-           on the same feed is inches (verified against forecasts and a
-           hand-read gauge on 5 Aug 2026). Unconverted, FLET showed
-           "4.15 in evaporated in 24h" — impossible in inches, ordinary
-           in mm. Convert here so the card and the ratings CSV both get
-           inches. If a station ever really does report inches this
-           makes it read 25x low, which is visible; the reverse error
-           read 25x high for a month and looked like a broken sensor. */
-        const etRaw = numOf(unwrap(rec.evaptrans_pm));
-        const et = etRaw === null ? null : etRaw / 25.4;
-        if (p === null && et === null) continue;
-        /* key by local hour so it lines up with Open-Meteo's timestamps */
-        const s = String(t);
-        hours[s.slice(0, 10) + "T" + s.slice(11, 13)] = { p: p, et: et };
-        n++;
-      }
-      if (!n) continue;
-      const m = meta[id] || {};
-      /* Readings but no coordinates: the station is real and we cannot
-         place it, so it cannot be matched to a trail. Silently dropping
-         it is how a missing gauge looks like no rain. Say so instead. */
-      if (m.lat == null || m.lon == null) { if (dropped) dropped.push(id + ":nocoords"); continue; }
-      seen[id] = 1;
-      out.push({ id: id, name: m.name || id, lat: m.lat, lon: m.lon, elev: m.elev == null ? null : m.elev, hours: hours });
+    } catch (e) {
+      if (dropped) dropped.push("query:" + label + ":" + String(e.message || e).slice(0, 240));
+      askLog.push(label + " failed");
+      continue;
     }
+    reachedUpstream = true;
+    let data = j.data || {};
+    /* A station id this process has never seen in ANY response gets one
+       full-window backfill for its network, so a brand-new gauge starts
+       with real history rather than a sliver. If the backfill throws,
+       the new ids are set aside untouched — nothing is banked that
+       would mask the retry on the next refresh. (Keyed on ids SEEN, not
+       ids stored: a station that appears but never parses a row must
+       not re-trigger this forever.) */
+    if (askH < WX_WINDOW_H) {
+      const news = Object.keys(data).filter(function (id) { return !wxStore.seenIds[id]; });
+      if (news.length) {
+        try {
+          j = await cloudsJson(cloudsUrl({
+            loc: loc, var: WX_VARS.join(","),
+            start: "-" + WX_WINDOW_H + " hours", end: "now", int: "1 hour", obtype: "H"
+          }));
+          data = j.data || {};
+          askH = WX_WINDOW_H;
+        } catch (e) {
+          for (const id of news) delete data[id];
+          if (dropped) dropped.push("wxbackfill deferred:" + news.slice(0, 6).join(","));
+        }
+      }
+    }
+    let newestKey = wxStore.newestKey[loc] || "";
+    for (const id of Object.keys(data)) {
+      wxStore.seenIds[id] = 1;
+      const fresh = parseWxHours(data[id]);
+      const keys = Object.keys(fresh);
+      if (!keys.length) continue;
+      const had = wxStore.byId[id];
+      const merged = mergeHours(had && had.hours, fresh);
+      if (Object.keys(merged).length) wxStore.byId[id] = { hours: merged };
+      else delete wxStore.byId[id];   /* retractions can empty a gauge */
+      for (const k of keys) if (fresh[k] !== null && k > newestKey) newestKey = k;
+    }
+    /* The cursor is the wall time this network's newest DATA hour last
+       moved forward — not the time we last asked. If upstream stalls
+       (empty 200s, or rows that stop advancing while ingest lags), the
+       cursor parks and the ask window widens refresh by refresh until
+       it spans the whole stall — which is exactly how the old full
+       re-pull healed the same cases, minus the standing cost. The
+       accepted loss: a SINGLE gauge uploading a backlog deeper than
+       the overlap while its network's newest kept advancing — those
+       hours are simply never fetched (there is no periodic full
+       re-pull anymore); the page scores them from forecast, honestly,
+       until they age past the window. */
+    if (newestKey && newestKey !== (wxStore.newestKey[loc] || "")) {
+      wxStore.newestKey[loc] = newestKey;
+      wxStore.fetchedAt[loc] = nowMs;
+    }
+    askLog.push(label + " " + askH + "h");
+  }
+  if (reachedUpstream) wxStore.lastFetchMs = nowMs;
+
+  /* Age the whole store against the fleet's newest reading, then let
+     anything with no hours left fall away. The newest is clamped to a
+     few hours past the wall clock so one future-dated row cannot wipe
+     the fleet (data time normally trails wall time here, so the clamp
+     never binds on healthy data). */
+  let newestMs = null;
+  for (const id of Object.keys(wxStore.byId)) {
+    for (const k of Object.keys(wxStore.byId[id].hours)) {
+      const ms = hourKeyMs(k);
+      if (ms !== null && (newestMs === null || ms > newestMs)) newestMs = ms;
+    }
+  }
+  const capMs = nowMs + 3 * 3600000;
+  if (newestMs !== null && newestMs > capMs) newestMs = capMs;
+  if (newestMs !== null) {
+    const cutoffMs = newestMs - WX_WINDOW_H * 3600000;
+    for (const id of Object.keys(wxStore.byId)) {
+      const kept = pruneHoursBefore(wxStore.byId[id].hours, cutoffMs);
+      if (Object.keys(kept).length) wxStore.byId[id].hours = kept;
+      else delete wxStore.byId[id];
+    }
+  }
+  console.log("wx delta: " + (askLog.join(", ") || "no networks") + "; " +
+    Object.keys(wxStore.byId).length + " gauges in store");
+
+  return wxPayload(dropped);
+}
+
+/* Build the payload from the store — same shape as it has always been,
+   so the page and the grader see nothing new. Metadata merged across
+   every network first (ids are network-unique), then one pass. */
+async function wxPayload(dropped) {
+  const meta = {};
+  for (const loc of locVariants(CLOUDS_WX_LOC)) {
+    Object.assign(meta, await stationMeta(loc, WX_VARS.join(",")));
+  }
+  const out = [];
+  for (const id of Object.keys(wxStore.byId)) {
+    const m = meta[id] || {};
+    /* Readings but no coordinates: the station is real and we cannot
+       place it, so it cannot be matched to a trail. Silently dropping
+       it is how a missing gauge looks like no rain. Say so instead. */
+    if (m.lat == null || m.lon == null) { if (dropped) dropped.push(id + ":nocoords"); continue; }
+    out.push({ id: id, name: m.name || id, lat: m.lat, lon: m.lon,
+               elev: m.elev == null ? null : m.elev, hours: wxStore.byId[id].hours });
   }
   return out;
 }
@@ -514,29 +725,37 @@ async function cocoMeta() {
     }
   } catch (e) {
     /* Same rule as stationMeta: a failed meta call must not cache an
-       empty map over a good one for 24 hours. */
-    if (cocoMetaCache.byId && Object.keys(cocoMetaCache.byId).length) return cocoMetaCache.byId;
+       empty map — not over a good one, and not on a cold boot either
+       (same 24h-blank hazard fixed there 15 Aug 2026). */
+    return (cocoMetaCache.byId && Object.keys(cocoMetaCache.byId).length) ? cocoMetaCache.byId : {};
   }
-  if (!Object.keys(byId).length && cocoMetaCache.byId && Object.keys(cocoMetaCache.byId).length) return cocoMetaCache.byId;
+  if (!Object.keys(byId).length) return cocoMetaCache.byId || byId;
   cocoMetaCache = { at: Date.now(), byId: byId };
   return byId;
 }
 
+let cocoCache = { at: 0, rows: null };
 async function cocoSeries(dropped) {
+  /* Morning-read tubes change once a day; serving the cached rows for
+     COCO_TTL (default 6h) costs nothing in freshness and cuts this
+     query from every refresh to ~4 a day. */
+  if (cocoCache.rows && Date.now() - cocoCache.at < COCO_TTL) return cocoCache.rows;
   let j;
   try {
     j = await cloudsJson(cloudsUrl({
       loc: CLOUDS_COCO_LOC, var: "precip",
-      /* Four days, not two. These are people reading a tube by hand: a
-         window barely wider than the reporting lag leaves the whole
-         network looking silent whenever anyone is a day behind, and the
-         freshest-numeric-value pick below already discards the staleness
-         we don't want. Widening costs one row per observer. */
-      start: "-4 days", end: "now", int: "1 day", obtype: "D", metadata: "no"
+      /* Two days of daily rows: tolerant of an observer who is a day
+         behind (the freshest-numeric pick below handles that). This was
+         -4 days until 15 Aug 2026 — but the page's own freshness cutoff
+         already hides readings older than two days, so days three and
+         four were rows nobody could ever see: pure row cost. */
+      start: "-2 days", end: "now", int: "1 day", obtype: "D", metadata: "no"
     }));
   } catch (e) {
     if (dropped) dropped.push("coco:" + String(e.message || e).slice(0, 60));
-    return [];
+    /* Serve yesterday's volunteers over none — their rows are dated, so
+       the page's wording stays honest even when this cache is old. */
+    return cocoCache.rows || [];
   }
   const data = j.data || {};
   const meta = await cocoMeta();
@@ -586,7 +805,15 @@ async function cocoSeries(dropped) {
     else dropped.push("coco:" + ids + " observers returned, none usable (" +
                       noNumber + " without a number, " + unplaced + " without coordinates)");
   }
-  return out;
+  /* Same rule as every other cache here: never bank an empty result
+     over a populated one. An empty fetch keeps the old rows serving and
+     leaves the cache clock alone so the next refresh retries upstream. */
+  if (out.length) {
+    cocoCache = { at: Date.now(), rows: out };
+    console.log("coco refetch: " + out.length + " observers");
+    return out;
+  }
+  return cocoCache.rows || out;
 }
 
 /* ==================== forecast grading ====================
@@ -898,8 +1125,15 @@ async function soilHarvest() {
      upstream on the short TTL rather than the long one. */
   const empty = !stations.length && !wx.length && !coco.length;
   if (!empty) {
-    soilGood = payload;
-    soilCache = { at: Date.now(), ttl: SOIL_TTL, payload: payload };
+    /* Since the wx and coco stores self-heal across an outage (15 Aug
+       2026), "some list is non-empty" no longer proves upstream is
+       healthy — the soil-station queries are the part still fetched
+       fresh every harvest. A station-less payload with store-served
+       rain is worth serving, but on the short TTL so upstream gets
+       retried in minutes, and it is never banked as the last GOOD
+       payload (that would evict real station rows from the fallback). */
+    if (stations.length) soilGood = payload;
+    soilCache = { at: Date.now(), ttl: stations.length ? SOIL_TTL : SOIL_FAIL_TTL, payload: payload };
     return payload;
   }
   if (soilGood) {
