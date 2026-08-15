@@ -778,10 +778,11 @@ not estimate them.
 appear in `index.html` — the page calls our `/soil` proxy instead.
 CLOUDS also sends no CORS headers, so a proxy is required regardless.
 
-- `GET /soil` — cached 60 min, returns `{stations:[…]}`; the page picks
-  the nearest station within 45 miles that actually reported. Returns
-  an empty list rather than an error when the key is missing or CLOUDS
-  is down, so the page degrades to nothing.
+- `GET /soil` — cached 60 min (`SOIL_TTL_MIN` env overrides, along with
+  `SOIL_FAIL_TTL_MIN` and `COCO_TTL_MIN`), returns `{stations:[…]}`; the
+  page picks the nearest station within 45 miles that actually reported.
+  Returns an empty list rather than an error when the key is missing or
+  CLOUDS is down, so the page degrades to nothing.
 - `GET /soil/raw?token=…&type=meta` — token-gated view of the raw
   upstream response, for checking the JSON shape. The parser in
   `server.js` (`harvest`) is deliberately shape-tolerant because CLOUDS
@@ -798,12 +799,25 @@ CLOUDS also sends no CORS headers, so a proxy is required regardless.
 - **Quota is counted in datapoints, not requests.** Public tier is
   300,000/month; the 5-6 Aug outage was this account at 300,655. NCSU
   (John McGuire) raised it to 600,000 temporarily on 10 Aug 2026 —
-  budget against 300k so the bump's expiry is a non-event. The -3-day
-  hourly wx series is ~91% of every refresh; the 14 Aug scoping cut
-  ~10% of the total (the soil query's own cost fell ~5/6, and the two
-  Polk County TN gauges came off the hourly wx series). If the budget
-  binds again the levers are sensor-plan 0b's wx delta-fetch or
-  dropping `evaptrans_pm` (display-only, halves the wx cost).
+  budget against 300k so the bump's expiry is a non-event. The 14 Aug
+  scoping cut ~10% (soil query −5/6, two Polk County TN gauges off the
+  wx series); the 15 Aug **delta-fetch** cut the rest of what mattered:
+  the 72-hour wx window lives in `wxStore` (process memory) and each
+  refresh asks CLOUDS only for the hours since that network's last
+  success +2h overlap, so a warm refresh costs ~130 datapoints instead
+  of ~3,170, and CoCoRaHS is cached 6h (`COCO_TTL_MIN`) over a -2 day
+  window. Cold boots (every deploy) still pay one full 72h pull per
+  network — the boot grading run does this within a minute. Worst case
+  at fully steady traffic is now ~5k datapoints/day (~150k/month),
+  inside the public tier; it was ~87k/day before the delta. A
+  soil-station outage retries on the 5-minute fail TTL but
+  `WX_MIN_INTERVAL` (20 min, env `WX_MIN_INTERVAL_MIN`) floors the wx
+  rounds, bounding that degraded mode near ~10k/day. The wx and coco
+  stores also self-heal across an upstream outage: stored hours keep
+  serving (aged against the fleet's newest reading, data time not wall
+  clock) instead of vanishing for an hour, and QC retractions land —
+  a value CLOUDS nulls after publishing deletes the stored hour on the
+  next overlap fetch.
 
 **Never inspect `/soil` through `WebFetch`.** It is ~70 KB and WebFetch
 silently truncates it, so what comes back is a well-formed-looking
@@ -847,18 +861,28 @@ and a non-empty `coco` is the check to run after any change to
 has never been non-empty. After the 14 Aug 2026 county scoping the
 plausible numbers are: stations ~12-15 (was 48 statewide), wx ~22 (was
 24 — the two Polk County TN strays are gone on purpose), coco ~70+.
+Since the 15 Aug delta-fetch, Railway deploy logs also carry one
+`wx delta: RAWS Nh, USCRN Nh, ECONET Nh; K gauges in store` line per
+upstream round (an erroring network prints `RAWS failed` in its slot) —
+72h on a cold boot, 3h warm-hourly, wider after a quiet gap or an
+upstream stall — and a `coco refetch: N observers` line at most every
+6h. Rounds inside the 20-minute `WX_MIN_INTERVAL` floor print nothing
+and serve the store. Those lines are the fastest way to confirm the
+delta is behaving.
 
-**Cold `/soil` is slow; warm `/soil` is not.** The payload costs six
-upstream CLOUDS data calls per refresh (CLOUDS_LOC splits into ECONET +
-USCRN, CLOUDS_WX_LOC into RAWS + USCRN + ECONET, plus one CoCoRaHS
-query), and a truly cold boot adds up to six 24h-cached meta lookups
-on top, so the first request after a deploy can take
+**Cold `/soil` is slow; warm `/soil` is not.** A cold boot pays six
+upstream CLOUDS data calls (CLOUDS_LOC splits into ECONET + USCRN,
+CLOUDS_WX_LOC into RAWS + USCRN + ECONET at the full 72h window, plus
+one CoCoRaHS query) and up to six 24h-cached meta lookups on top, so
+the first request after a deploy can take
 long enough to time out a client — it did twice on 4 Aug. Once
 `soilCache` fills it serves in ~10ms and the page paints measured scores
 about a second after load, with no visible forecast-only flash. So don't
 diagnose a slow `/soil` right after shipping: request it once to warm
-it, then measure. If it ever needs fixing properly, warm the cache on
-boot rather than making the first visitor pay.
+it, then measure. Warm refreshes are far lighter since the delta-fetch
+(small windows, coco usually cached), so the slow case is specifically
+the post-deploy or post-quiet-gap one. If it ever needs fixing properly,
+warm the cache on boot rather than making the first visitor pay.
 **Station matching: closest wins, ties break downhill.** Matt's call
 (3 Aug 2026). Distance decides it; where two stations are within
 `STATION_TIE_MI` (2 miles) of each other they count as equally near and
