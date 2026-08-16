@@ -134,18 +134,34 @@ window.ALTAR_SETTINGS = {
 #dirt-app .da-window{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--muted);margin:0 0 12px;}
 #dirt-app .da-window b{font-weight:700;}
 
-/* ---------- the day strip ---------- */
-#dirt-app .da-strip{
-  display:flex;gap:2px;align-items:flex-end;height:62px;
-  padding-bottom:6px;border-bottom:1px solid var(--line);
+/* ---------- the soil dials ----------
+   Three per card — the same weather scored through rock, clay and loam.
+   Replaced the per-hour bar strip 15 Aug 2026: cards are AREAS holding
+   more than one kind of dirt, and one bar-curve for one soil answered
+   the wrong question. Needle = now; dashed ghost = the best daylight
+   hour left today on that soil's own curve. */
+#dirt-app .da-trio{display:flex;gap:9px;}
+#dirt-app .da-g{flex:1;min-width:0;text-align:center;}
+#dirt-app .da-glab{
+  font-family:'Space Mono',monospace;font-size:9px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ash);margin-bottom:2px;
 }
-#dirt-app .da-slot{flex:1;height:100%;display:flex;align-items:flex-end;position:relative;cursor:crosshair;}
-#dirt-app .da-bar{width:100%;transition:opacity .15s;}
-#dirt-app .da-bracket{position:absolute;left:0;right:0;bottom:-6px;height:2px;background:var(--rust);}
-#dirt-app .da-axis{
-  display:flex;justify-content:space-between;font-family:'Space Mono',monospace;
-  font-size:9.5px;letter-spacing:.06em;color:var(--muted);margin:7px 0 14px;
+#dirt-app .da-g svg{display:block;width:100%;height:auto;}
+#dirt-app .da-gval{
+  font-family:'Space Mono',monospace;font-weight:700;font-size:21px;line-height:1;
+  margin-top:-2px;font-variant-numeric:tabular-nums;
 }
+#dirt-app .da-needle{
+  transform-box:view-box;transform-origin:100px 104px;transform:rotate(-90deg);
+  transition:transform 1.3s cubic-bezier(.22,.9,.36,1.02);
+}
+#dirt-app .da-ghost{opacity:0;transition:opacity .7s ease 1.3s;}
+#dirt-app .da-prime{
+  font-family:'Space Mono',monospace;font-size:9.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ash);
+  margin:8px 0 14px;border-bottom:1px solid var(--line);padding-bottom:10px;
+}
+#dirt-app .da-prime b{color:var(--rust);font-weight:700;margin-right:6px;}
 
 /* ---------- facts ---------- */
 #dirt-app .da-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(56px,1fr));gap:10px;margin:0 0 12px;}
@@ -1646,21 +1662,135 @@ window.ALTAR_SETTINGS = {
     });
   }
 
+  /* ---------- the soil dials ----------
+     Every card shows the same three archetype dirts, each scored by a
+     full model re-run with only the soil swapped — the exact mechanism
+     the corrections sheet uses through ALTAR_MODEL.at(). Rock leads on
+     any drying day by construction (wet 0.55 against clay's 1.30), so
+     the signal is the GAP between dials, not who's first — the prime
+     line under the trio reads that out. The card header's soil label
+     says which dirt the big number above describes. */
+  var GAUGE_SOILS = [
+    { soil: "rocky", label: "Rock" },
+    { soil: "clay",  label: "Clay" },
+    { soil: "loam",  label: "Loam" }
+  ];
+  /* The five score bands, drawn once and reused by every dial. Same
+     cutoffs as the key-assignment chain in evaluate(); if those move,
+     move these. The dial arc is a score scale, so the special states
+     (frozen/dusty/powder) don't get bands — they show in the value
+     colour under the dial instead. */
+  var GAUGE_CUTS = [
+    { to: 36, key: "slop" }, { to: 56, key: "wet" }, { to: 72, key: "soft" },
+    { to: 88, key: "good" }, { to: 100, key: "hero" }
+  ];
+  function gaugePt(score, r) {
+    var a = Math.PI * (1 - score / 100);
+    return [100 + r * Math.cos(a), 104 - r * Math.sin(a)];
+  }
+  function gaugeArc(from, to) {
+    var p1 = gaugePt(from, 76), p2 = gaugePt(to, 76);
+    /* Large-arc flips at >100 points = >180° on this half-circle scale.
+       No band is near that today, but the cutoffs are invited to move
+       with evaluate()'s, and a 51-99 point band under a >50 test would
+       silently render as the wrong-way major arc. */
+    return "M" + p1[0].toFixed(2) + " " + p1[1].toFixed(2) +
+           " A76 76 0 " + (to - from > 100 ? 1 : 0) + " 1 " +
+           p2[0].toFixed(2) + " " + p2[1].toFixed(2);
+  }
+  var GAUGE_BANDS = (function () {
+    var s = "", from = 0;
+    GAUGE_CUTS.forEach(function (c) {
+      s += '<path d="' + gaugeArc(from, c.to) + '" stroke="' + STATES[c.key].color +
+           '" stroke-width="16" fill="none" opacity="0.9"/>';
+      from = c.to;
+    });
+    return s;
+  })();
+
+  /* Models for the two archetypes the card's own soil isn't. buildModel
+     is pure apart from re-caching the same raw payload, and each run is
+     a few hundred hourly evaluations — three dials cost single-digit
+     milliseconds, same as the sheet's what-if reruns. */
+  function soilModels(t, m) {
+    return GAUGE_SOILS.map(function (g) {
+      if (t.soil === g.soil) return { label: g.label, m: m };
+      var alt = {}, k;
+      for (k in t) alt[k] = t[k];
+      alt.soil = g.soil;
+      return { label: g.label, m: buildModel(alt, MODEL_RAWS[t.name]) };
+    });
+  }
+
+  /* The best daylight hour still ahead of now TODAY, off one soil's own
+     curve. A single hour, deliberately not a mean — m.best averages a
+     stretch, which can swallow a storm dip in the middle; a ghost that
+     points at a specific hour has to answer for that hour alone. Null
+     once daylight is spent, and the dial just shows now. */
+  function bestAhead(ma) {
+    var best = null;
+    ma.today.forEach(function (h) {
+      if (h.idx <= ma.nowIdx || !h.daylight) return;
+      if (!best || h.score > best.score) best = h;
+    });
+    return best;
+  }
+
+  function gaugeHtml(label, ma) {
+    var score = clamp(ma.now.score, 0, 100);
+    var col = STATES[ma.now.key].color;
+    var ahead = bestAhead(ma), ghost = "";
+    if (ahead) {
+      var gs = clamp(ahead.score, 0, 100);
+      var gp = gaugePt(gs, 66), gl = gaugePt(gs, 90);
+      /* Label x clamped in from the viewBox edges so a 3-char hour at a
+         score-extreme ghost ("12P" at 100) doesn't shave its last glyph. */
+      var glx = Math.max(14, Math.min(186, gl[0]));
+      ghost = '<g class="da-ghost">' +
+        '<line x1="100" y1="104" x2="' + gp[0].toFixed(1) + '" y2="' + gp[1].toFixed(1) +
+        '" stroke="#8C7D70" stroke-width="2" stroke-dasharray="4 3"/>' +
+        '<text x="' + glx.toFixed(1) + '" y="' + gl[1].toFixed(1) +
+        '" fill="#8C7D70" font-size="12" font-family="Space Mono,monospace" text-anchor="middle">' +
+        hourLabel(ahead.hour).toUpperCase() + '</text></g>';
+    }
+    return '<div class="da-g"><div class="da-glab">' + esc(label) + '</div>' +
+      '<svg viewBox="0 0 200 118" aria-hidden="true">' + GAUGE_BANDS + ghost +
+      '<g class="da-needle" data-rot="' + (score * 1.8 - 90).toFixed(1) + '">' +
+        '<line x1="100" y1="104" x2="100" y2="40" stroke="#CCCCCC" stroke-width="4" stroke-linecap="round"/>' +
+      '</g>' +
+      '<circle cx="100" cy="104" r="7" fill="#241B15" stroke="#CCCCCC" stroke-width="2"/>' +
+      '</svg><div class="da-gval" style="color:' + col + '">' + r0(ma.now.score) + '</div></div>';
+  }
+
+  /* One line under the dials: the spread between the best and worst
+     dirt right now, then where today is headed on this card's own
+     soil. When the native soil is one of the three dials the trend
+     hour matches that dial's ghost; for clayrock/blend/sandy natives
+     it's the header dirt's own curve, which has no dial — the honest
+     answer for "this area", not a mismatch with the ghosts. */
+  function primeLine(sm3, m) {
+    var vals = sm3.map(function (x) {
+      return { n: x.label, s: Math.round(x.m.now.score) };
+    }).sort(function (a, b) { return b.s - a.s; });
+    var gap = vals[0].s - vals[2].s;
+    var head = gap >= 15
+      ? vals[0].n + " +" + gap + " over " + vals[2].n.toLowerCase() + " — pick by dirt"
+      : "every dirt within " + gap + " — ride anything";
+    var ahead = bestAhead(m);
+    if (!ahead) return head;
+    var delta = ahead.score - m.now.score;
+    var trend = delta >= 3 ? "better by " + hourLabel(ahead.hour)
+              : delta <= -3 ? "slides later — go now" : "steady";
+    return head + " · " + trend;
+  }
+
   function renderCard(el, t, m) {
     var body = el.querySelector(".da-body");
     var s = STATES[m.now.key];
 
-    var strip = "";
-    m.today.forEach(function (h) {
-      var st = STATES[h.key];
-      var op = h.past ? 0.24 : h.daylight ? 1 : 0.42;
-      var ring = h.idx === m.nowIdx ? "outline:1px solid #CCCCCC;" : "";
-      var brk = (m.best && h.hour >= m.best.from && h.hour <= m.best.to)
-        ? '<span class="da-bracket"></span>' : "";
-      strip += '<div class="da-slot" data-h="' + h.hour + '">' +
-        '<span class="da-bar" style="height:' + Math.max(4, h.score) + "%;background:" + st.color +
-        ";opacity:" + op + ";" + ring + '"></span>' + brk + "</div>";
-    });
+    var sm3 = soilModels(t, m);
+    var trio = "";
+    sm3.forEach(function (x) { trio += gaugeHtml(x.label, x.m); });
 
     var drivers = "";
     m.now.drivers.forEach(function (d) {
@@ -1698,8 +1828,8 @@ window.ALTAR_SETTINGS = {
           : m.now.score < 72
             ? "Not today, and nothing in the forecast brings it back this week."
             : "No good window left today.") + "</p>" +
-      '<div class="da-strip">' + strip + "</div>" +
-      '<div class="da-axis"><span>12a</span><span>6a</span><span>noon</span><span>6p</span><span>11p</span></div>' +
+      '<div class="da-trio">' + trio + "</div>" +
+      '<p class="da-prime"><b>Prime</b>' + primeLine(sm3, m) + "</p>" +
       '<dl class="da-facts">' +
         "<div><dt>now</dt><dd>" + r0(m.current.temperature_2m) + "\u00B0 " + esc(WMO[m.current.weather_code] || "") + "</dd></div>" +
         "<div><dt>24h rain</dt><dd>" + m.p24.toFixed(2) + '"</dd></div>' +
@@ -1722,29 +1852,21 @@ window.ALTAR_SETTINGS = {
       toggle.textContent = open ? "Why this number" : "Hide the math";
     });
 
-    var scoreEl = body.querySelector(".da-score");
-    var stateEl = body.querySelector(".da-state");
-    var blurbEl = body.querySelector(".da-blurb");
-    body.querySelectorAll(".da-slot").forEach(function (slot) {
-      slot.addEventListener("mouseenter", function () {
-        var h = m.today[parseInt(slot.getAttribute("data-h"), 10)];
-        if (!h) return;
-        var hs = STATES[h.key];
-        scoreEl.textContent = r0(h.score);
-        scoreEl.style.color = hs.color;
-        stateEl.textContent = hs.label;
-        stateEl.style.color = hs.color;
-        stateEl.style.borderColor = hs.color;
-        blurbEl.textContent = hourLabel(h.hour) + " \u2014 " + (WMO[h.code] || "\u2014") +
-          ", " + r0(h.temp) + "\u00B0" + (h.pop != null ? ", " + r0(h.pop) + "% chance" : "");
-      });
-      slot.addEventListener("mouseleave", function () {
-        scoreEl.textContent = r0(m.now.score);
-        scoreEl.style.color = s.color;
-        stateEl.textContent = s.label;
-        stateEl.style.color = s.color;
-        stateEl.style.borderColor = s.color;
-        blurbEl.textContent = s.blurb;
+    /* Sweep the needles in. An SVG transform ATTRIBUTE does not CSS-
+       transition \u2014 the rotation has to land on style.transform, and
+       only after the initial rotate(-90deg) has painted, hence the two
+       animation frames. Re-renders (the measured repaint) sweep again;
+       that's the same paints-twice behaviour the cards have always
+       had, and the second sweep is the score visibly correcting. */
+    var needles = body.querySelectorAll(".da-needle");
+    var ghosts = body.querySelectorAll(".da-ghost");
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        needles.forEach(function (n, i) {
+          n.style.transitionDelay = (i * 0.1).toFixed(1) + "s";
+          n.style.transform = "rotate(" + n.getAttribute("data-rot") + "deg)";
+        });
+        ghosts.forEach(function (g) { g.style.opacity = "1"; });
       });
     });
 
