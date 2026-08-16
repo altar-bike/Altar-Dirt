@@ -143,6 +143,10 @@ const r = await page.evaluate(() => {
     scores: cards.map((c) => c.querySelector(".da-score")?.textContent ?? null),
     windows: cards.map((c) => c.querySelector(".da-window")?.textContent.trim()),
     drivers: [...(cards[0]?.querySelectorAll(".da-why li") || [])].map((l) => l.textContent.replace(/\s+/g, " ").trim()),
+    gaugesPerCard: cards.map((c) => c.querySelectorAll(".da-needle").length),
+    ghostsPerCard: cards.map((c) => c.querySelectorAll(".da-ghost").length),
+    primes: cards.map((c) => (c.querySelector(".da-prime")?.textContent || "").replace(/\s+/g, " ").trim()),
+    stripLeftovers: document.querySelectorAll(".da-strip, .da-slot, .da-bar, .da-axis, .da-bracket").length,
     measured: rowsOf(cards[0]),
     meaning: cards[0]?.querySelector(".da-meaning")?.textContent.replace(/\s+/g, " ").trim() || null,
     outlookRows: cards[0]?.querySelectorAll(".da-orow").length ?? 0,
@@ -189,6 +193,20 @@ if (!r.kanugaRows.some((l) => /rain·d/.test(l) && /volunteer daily gauge/.test(
 /* Five-day outlook, one row per day. */
 if (r.outlookRows !== 5) problems.push("expected 5 outlook rows, got " + r.outlookRows);
 
+/* Every card carries three soil dials (rock/clay/loam) in place of the
+   hourly bar strip — 15 Aug 2026. Count is per card so a card that lost
+   its dials shows up by index, and the strip must be gone entirely. */
+if (r.gaugesPerCard.some((n) => n !== 3))
+  problems.push("a card is missing soil dials: [" + r.gaugesPerCard.join(",") + "]");
+if (r.stripLeftovers !== 0) problems.push("old hourly strip markup still renders");
+if (r.primes.some((p) => !p || !/prime/i.test(p)))
+  problems.push("a card is missing its prime line");
+/* Ghost needles mark the best daylight hour still ahead TODAY, so they
+   exist exactly when daylight remains (synthetic sunset hour is 20). */
+const expectGhosts = hourOf(NOW) < 20 ? 3 : 0;
+if (r.ghostsPerCard.some((n) => n !== expectGhosts))
+  problems.push("expected " + expectGhosts + " ghosts per dial trio, got [" + r.ghostsPerCard.join(",") + "]");
+
 if (r.errors.length) problems.push("cards showing an error: " + r.errors[0]);
 /* 8 original local + 2 original away + 9 spots added 6 Aug 2026 + 2 new
    away (WildSide, Jarrod's) + 3 spots added 10 Aug 2026 (Stony Fork Park,
@@ -206,6 +224,7 @@ console.log("window  :", r.windows[0]);
 console.log("drivers :", r.drivers.join("  |  "));
 console.log("measured:", r.measured.join("  |  "));
 console.log("meaning :", r.meaning);
+console.log("prime   :", r.primes[0]);
 
 if (problems.length) { console.error("\nFAIL\n" + problems.join("\n")); process.exit(1); }
 console.log("\nPASS — " + r.cards + " cards, no JS errors");
