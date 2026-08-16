@@ -8,7 +8,7 @@ Put this file in the project folder root as `CLAUDE.md` and it loads automatical
 
 ## What this project is
 
-A single static HTML page that scores mountain bike trail rideability from weather data. It reads Open-Meteo (soil moisture at 0–1cm and 3–9cm, soil temperature at 6cm, hourly rain, sun, wind, humidity — three days back, six forward), runs a scoring model in the browser, and shows a per-hour condition strip for twenty-four riding areas around western NC (twenty local, four out-of-state behind the "Worth the drive" button — count updated 6 Aug 2026 when nine of Matt's new spots shipped, then again 10 Aug 2026 when the last three shipped once he sent pins).
+A single static HTML page that scores mountain bike trail rideability from weather data. It reads Open-Meteo (soil moisture at 0–1cm and 3–9cm, soil temperature at 6cm, hourly rain, sun, wind, humidity — three days back, six forward), runs a scoring model in the browser, and shows three soil dials per card for twenty-four riding areas around western NC (twenty local, four out-of-state behind the "Worth the drive" button — count updated 6 Aug 2026 when nine of Matt's new spots shipped, then again 10 Aug 2026 when the last three shipped once he sent pins). The dials replaced a per-hour bar strip on 15 Aug 2026 — see "The soil dials" below.
 
 **`index.html` is the entire application.** No build step, no package manager, no dependencies except Google Fonts over CDN. Do not introduce any. If you find yourself wanting npm, stop and ask.
 
@@ -209,6 +209,59 @@ Search by string, never by line number — line numbers move.
 | Soil probes we don't believe | `var SOIL_PROBE_BLOCK` |
 | Model handle for the review sheet | `window.ALTAR_MODEL` |
 | Cached payloads, keyed by trail | `var MODEL_RAWS` |
+| The three dial dirts | `var GAUGE_SOILS` |
+| Dial score bands (mirror `evaluate`'s cutoffs) | `var GAUGE_CUTS` |
+| Ghost-needle hour | `function bestAhead` |
+| Dial gap sentence | `function primeLine` |
+
+### The soil dials (shipped 15 Aug 2026, replaced the hourly bar strip)
+
+Matt's design, workshopped over four mockups: each card is an AREA whose
+trails run through more than one kind of dirt, so one score-per-hour
+curve of one soil answered the wrong question. Every card now shows
+three half-circle dials — **Rock, Clay, Loam** — each a **full model
+re-run with only the soil swapped** (`soilModels()` copies the trail and
+calls `buildModel`, the exact mechanism `ALTAR_MODEL.at()` has always
+used for the corrections sheet). The card's native soil reuses the model
+already built; the header's soil label says which dirt the big number
+describes. The hourly strip, its hover inspector and its rust
+best-window bracket are gone.
+
+Mechanics worth knowing before touching it:
+
+- **Rock leads every drying day by construction** (`wet` 0.55 against
+  clay's 1.30), so the ranking is not the signal — the **gap** is. The
+  `Prime` line under the trio prints it: gap ≥ 15 → "Rock +N over clay —
+  pick by dirt", else "every dirt within N — ride anything", plus a
+  trend word ("better by 6p" / "slides later — go now" / "steady") read
+  off the native soil's own curve.
+- **The dashed ghost needle is the best daylight hour still ahead
+  today**, per soil, from that soil's own re-run curve (`bestAhead()`).
+  A single hour, deliberately NOT a mean: `m.best` (the window line)
+  averages a 4-hour stretch, and on a stormy afternoon the best
+  remaining mean can legitimately contain a storm dip — live-confirmed
+  15 Aug 2026 on Pisgah — Lower, where "Best window today 3p–7p"
+  coexisted with a 41-score storm hour at 5p because the window is the
+  best mean LEFT at render time and `fmtRange` labels through the END of
+  the last hour (from=15,to=18 prints "3p–7p", so the 6p hour is inside
+  it). That is designed behaviour, not a bug — but don't make the ghost
+  inherit it. Ghosts vanish after the last daylight hour; the dial just
+  shows now.
+- **Dial geometry:** viewBox `0 0 200 118`, hub (100,104), band arcs at
+  r=76 from `GAUGE_CUTS` — which mirror the score cutoffs in
+  `evaluate()`'s key chain (36/56/72/88); if those move, move these. The
+  special states (frozen/dusty/powder) have no band — they show in the
+  value colour under the dial, same STATES entry the big score uses.
+- **The sweep animation needs `style.transform`,** not the SVG transform
+  attribute (attributes don't CSS-transition). Needles start at
+  `rotate(-90deg)` in CSS and get their real rotation set inside a
+  double `requestAnimationFrame` after `innerHTML` lands. Cards still
+  paint twice (forecast, then measured) and the second sweep is the
+  score visibly correcting — that's the existing behaviour, kept.
+- **Cost:** two extra `buildModel` runs per card per render (three for
+  clayrock/blend/sandy natives), single-digit milliseconds each. No new
+  network calls, no new colours (the bands reuse the five STATES tier
+  colours, so no new Sarah sign-off beyond the pending olive/bone one).
 
 ### `soil-review.html` — the corrections sheet
 
