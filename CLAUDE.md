@@ -37,7 +37,10 @@ me" (filter them), one is real (Matt, Bent Creek, 4 Aug).
   replaces the old Google Apps Script / Google Sheet route everywhere it's
   mentioned below; the ratings CSV now comes from the service's
   `/export.csv?token=…` endpoint (Matt has the token; it's also in the
-  Railway service variables).
+  Railway service variables). Since 10 Sep 2026 the volume also holds
+  `clouds-store.json` — the CLOUDS data and the month's quota ledger —
+  and `GET /status` says whether the measured data is current (see the
+  CLOUDS section).
 - **Railway deploys on push (since 4 Aug 2026, late evening).** Matt
   installed the Railway GitHub app on the altar-bike org and the service
   source is connected to `altar-bike/Altar-Dirt`, branch `main`, root
@@ -841,6 +844,16 @@ CLOUDS also sends no CORS headers, so a proxy is required regardless.
   `server.js` (`harvest`) is deliberately shape-tolerant because CLOUDS
   varies its nesting; if station readings stop appearing, compare
   `/soil/raw` against the parser before assuming the API broke.
+- **`GET /status`** (10 Sep 2026) — `ok` and HTTP 200 when the soil
+  payload is under 6h old and the rain gauges were reached inside 12h;
+  otherwise HTTP 503 with `problems`. `warnings` carries the non-alarm
+  conditions: CoCoRaHS rows older than the page's two-day cutoff, a
+  budget pause, a failed-round streak. Also `budget` (the month's
+  ledger and how far through the month we are), `nextRound`, and the
+  last eight upstream errors. Point a free uptime monitor at it — it is
+  the alarm the 5–10 Sep outage never had. `/health` stays 200 whenever
+  the process is up; Railway restarts on that, and a restart does not
+  fix a dead upstream.
 - Endpoint is `api.climate.ncsu.edu/data.php`; variables are
   `soilmoist` (m³/m³) and `soiltemp` (°F). `soilmoist20cm` was dropped
   14 Aug 2026 on the maintainer's guidance: CLOUDS strips depth/height
@@ -871,6 +884,37 @@ CLOUDS also sends no CORS headers, so a proxy is required regardless.
   clock) instead of vanishing for an hour, and QC retractions land —
   a value CLOUDS nulls after publishing deletes the stored hour on the
   next overlap fetch.
+- **Two caps, not one (read off api.climate.ncsu.edu/usage, 10 Sep
+  2026): 300,000 datapoints AND 2,000 requests a month, 25,000
+  datapoints per request, all reset at the start of the month.** The
+  request cap is the tighter one for this service: a round is five
+  requests (two soil networks, three wx) plus CoCoRaHS every 6h and a
+  metadata lookup a week, so the old visitor-driven hourly refresh
+  would have run ~3,600 requests a month. Since 10 Sep 2026 `server.js`
+  keeps a monthly **ledger** (requests, and datapoints estimated as
+  params × stations × intervals — the policy page's own formula) and a
+  **pacer**: rounds are spaced so the remaining budget lasts the month,
+  against `CLOUDS_REQ_BUDGET` (default 1,700) and `CLOUDS_DP_BUDGET`
+  (default 250,000). At the defaults that is one round every ~2.2
+  hours, and a **keep-warm tick** spends it whether or not anyone is
+  looking, so the store is never more than a round behind and no
+  visitor waits on a fetch. A ledger that begins mid-month (first
+  deploy of this code, a lost volume) cannot know what the month has
+  already spent, so it budgets only the fraction of the month left —
+  the boot `clouds budget:` line says `prorated` when that is in
+  effect; a ledger that rolls over at the boundary gets the whole
+  budget. Raising `CLOUDS_REQ_BUDGET` is the knob for
+  fresher rain if the tier ever grows; never set it above 2,000. A
+  CLOUDS reply naming the quota parks upstream for a day at a time
+  (`clouds quota rejection` in the log) and the store keeps serving.
+  The ledger, the 72h wx window, the CoCoRaHS rows, station coordinates
+  and the last soil payload are **persisted to `/data/clouds-store.json`**
+  on the volume (atomic write, flushed on SIGTERM), so a deploy no
+  longer costs a 72-hour re-pull (~9,500 datapoints, six requests) or a
+  79-second first request, and the month's count survives restarts.
+  Upstream calls time out after 60s instead of hanging the single-flight
+  harvest, and a round where every wx network fails sets a back-off
+  floor (5 → 60 min) instead of being re-hit by every visitor.
 
 **Never inspect `/soil` through `WebFetch`.** It is ~70 KB and WebFetch
 silently truncates it, so what comes back is a well-formed-looking
@@ -923,6 +967,36 @@ upstream stall — and a `coco refetch: N observers` line at most every
 and serve the store. Those lines are the fastest way to confirm the
 delta is behaving.
 
+Since 10 Sep 2026 there are three more. `clouds round: N stations, K
+gauges, M coco; +R req, +D dp; month R/1700 req, D/250000 dp` prints
+once per upstream round, with `dropped: …` appended when anything
+failed — the reasons now reach the log, not only the payload. `clouds
+budget: …` prints once a day and at boot. At boot, `clouds store warm:
+…` or `cold: …` says what came off the volume, and `clouds config: …`
+names the effective TTLs, the budget and which selector env vars are
+set — the only way to see what Railway's variables actually are, since
+the MCP redacts their values. A failed wx network now prints its reason
+in its slot (`RAWS failed (CLOUDS 400 — …)`), and an empty CoCoRaHS
+fetch prints a dated `sample` of the raw rows it got.
+
+**The 5–10 Sep 2026 outage, and why nobody saw it.** Every `wx delta`
+from 01:03Z on 5 Sep to 01:03Z on 10 Sep read `RAWS failed, USCRN
+failed, ECONET failed`; the grader logged `graded: 0` from 6 Sep. The
+page kept painting — the store served its aged 72 hours, then the
+forecast filled in — so nothing looked broken. It healed on its own at
+12:13Z on 10 Sep, on the first page load of the day, with a full 72h
+re-pull. The cause is unrecoverable: the reason went into `dropped`
+(payload only) and the log said `failed`. CoCoRaHS went quiet
+separately — from 4 Sep the fetch returned one observer with no number
+and the cache served rows dated 2 Sep, which the page's two-day cutoff
+correctly hid. Both were CLOUDS-side; the 10 Sep changes are the fixes
+that could be made from here: reasons in the log, a back-off floor so
+an outage is not re-hit on every visit, `/status` to say so out loud,
+and the ledger so a quota cause can never again be a guess. Ask John
+McGuire (ticket INC4680542) whether CLOUDS had an incident in that
+window and whether CoCoRaHS ingest is current; nothing on our side
+changed on 4–5 Sep (last deploy 16 Aug).
+
 **Cold `/soil` is slow; warm `/soil` is not.** A cold boot pays six
 upstream CLOUDS data calls (CLOUDS_LOC splits into ECONET + USCRN,
 CLOUDS_WX_LOC into RAWS + USCRN + ECONET at the full 72h window, plus
@@ -936,6 +1010,9 @@ it, then measure. Warm refreshes are far lighter since the delta-fetch
 (small windows, coco usually cached), so the slow case is specifically
 the post-deploy or post-quiet-gap one. If it ever needs fixing properly,
 warm the cache on boot rather than making the first visitor pay.
+**Done 10 Sep 2026:** the store persists across deploys and the
+keep-warm tick refreshes it on the pacer's cadence, so a cold `/soil`
+now happens only on a brand-new volume.
 **Station matching: closest wins, ties break downhill.** Matt's call
 (3 Aug 2026). Distance decides it; where two stations are within
 `STATION_TIE_MI` (2 miles) of each other they count as equally near and
