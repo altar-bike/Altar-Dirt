@@ -200,6 +200,100 @@ const d = milesBetween(asheville[0], asheville[1], flet[0], flet[1]);
 if (!(d > 11 && d < 12.5)) problems.push("milesBetween: Asheville to FLET should be ~11.6 mi, got " + d.toFixed(2));
 if (milesBetween(35, -82, 35, -82) !== 0) problems.push("milesBetween: a point is not zero miles from itself");
 
+/* ---------------------------------------------------------------
+   The CLOUDS budget (10 Sep 2026). Two monthly caps on the public
+   tier — 2,000 requests, 300,000 datapoints — and a five-day outage
+   nobody saw. The pacer, the month roll and the quota classifier are
+   what keep the service inside the caps and honest about it; each is
+   pure and lifted from the shipping file.
+   --------------------------------------------------------------- */
+const monthWindow = lift("monthWindow");
+{
+  const w = monthWindow(Date.UTC(2026, 8, 10, 12));           /* 10 Sep 12:00Z */
+  eq("mid-month lands in that month", w.key, "2026-09");
+  eq("month starts at 05:00Z on the 1st", w.startMs, Date.UTC(2026, 8, 1, 5));
+  eq("month ends at 05:00Z on the next 1st", w.endMs, Date.UTC(2026, 9, 1, 5));
+  eq("03:00Z on the 1st still belongs to the OLD month — NCSU has not reset yet",
+    monthWindow(Date.UTC(2026, 8, 1, 3)).key, "2026-08");
+  eq("06:00Z on the 1st is the new month", monthWindow(Date.UTC(2026, 8, 1, 6)).key, "2026-09");
+  eq("January rolls the year", monthWindow(Date.UTC(2027, 0, 1, 3)).key, "2026-12");
+}
+
+const paceSpacingMs = lift("paceSpacingMs");
+{
+  const H = 3600000, now = Date.UTC(2026, 8, 1, 5), end = Date.UTC(2026, 9, 1, 5);   /* 30 days */
+  const sp = paceSpacingMs(0, 1700, 5, now, end);
+  if (!(sp > 2.1 * H && sp < 2.2 * H)) {
+    problems.push("a fresh month at 5 req/round should space ~2.1h, got " + (sp / H).toFixed(2) + "h");
+  }
+  eq("a spent budget means no more rounds", paceSpacingMs(1698, 1700, 5, now, end), Infinity);
+  eq("the last round that fits is allowed", paceSpacingMs(1695, 1700, 5, now, end) > 0, true);
+  eq("a zero-request round never divides by zero", paceSpacingMs(0, 1700, 0, now, end), Infinity);
+  eq("budget to spare at month end spaces at zero", paceSpacingMs(100, 1700, 5, end, end), 0);
+  /* half the month gone, half the budget gone: same cadence as day one */
+  const half = paceSpacingMs(850, 1700, 5, now + 15 * 24 * H, end);
+  if (Math.abs(half - sp) > 60000) {
+    problems.push("on pace mid-month should keep day-one spacing, got " + (half / H).toFixed(2) + "h vs " + (sp / H).toFixed(2) + "h");
+  }
+  /* half the budget gone by day 5: stretch to ~3.5h rather than blow the cap */
+  const hot = paceSpacingMs(850, 1700, 5, now + 5 * 24 * H, end);
+  if (!(hot > 3.4 * H && hot < 3.6 * H)) {
+    problems.push("an overspent month should stretch to ~3.5h, got " + (hot / H).toFixed(2) + "h");
+  }
+}
+
+const proratedBudget = lift("proratedBudget");
+{
+  const start = Date.UTC(2026, 8, 1, 5), end = Date.UTC(2026, 9, 1, 5);      /* 30 days */
+  eq("a ledger that began at the boundary gets the whole budget", proratedBudget(1700, start, start, end), 1700);
+  eq("no start recorded also gets the whole budget", proratedBudget(1700, 0, start, end), 1700);
+  eq("a ledger begun with 20 days left gets two thirds", proratedBudget(1700, end - 20 * 86400000, start, end), 1133);
+  eq("begun at the very end gets nothing", proratedBudget(1700, end, start, end), 0);
+}
+
+const isQuotaError = lift("isQuotaError");
+eq("the 5-6 Aug 2026 text is a quota error",
+  isQuotaError("CLOUDS 400 — You have exceeded your monthly data point limit of 300000 (300655 used)"), true);
+eq("a request-count limit is a quota error", isQuotaError("CLOUDS 400 — Monthly request limit reached"), true);
+eq("the per-request cap is NOT a month-long condition",
+  isQuotaError("CLOUDS 400 — request exceeds 25000 data points per request"), false);
+eq("a timeout is not a quota error", isQuotaError("The operation was aborted due to timeout"), false);
+eq("a 502 is not a quota error", isQuotaError("CLOUDS 502 — Bad Gateway"), false);
+eq("non-JSON is not a quota error", isQuotaError("CLOUDS returned non-JSON (<html>)"), false);
+eq("empty is not a quota error", isQuotaError(""), false);
+
+const failFloorMs = lift("failFloorMs");
+eq("the first failed round waits 5 min", failFloorMs(1), 5 * 60000);
+eq("doubling: 5, 10, 20, 40", [1, 2, 3, 4].map(failFloorMs), [5, 10, 20, 40].map((m) => m * 60000));
+eq("capped at an hour", failFloorMs(9), 60 * 60000);
+eq("a zero streak still waits the base", failFloorMs(0), 5 * 60000);
+
+const intOr = lift("intOr");
+eq("unset budget env falls back", intOr(undefined, 1700), 1700);
+eq("a real budget override is honored", intOr("1900", 1700), 1900);
+eq("zero and garbage are refused", [intOr("0", 5), intOr("lots", 5)], [5, 5]);
+
+/* The store on disk: one bad section must cost only that section. */
+const unpackStore = lift("unpackStore");
+{
+  const good = {
+    v: 1, savedAt: "2026-09-10T12:00:00Z",
+    wxStore: { byId: { BSKN7: { hours: {} } }, fetchedAt: {}, newestKey: {}, seenIds: {}, lastFetchMs: 1 },
+    cocoCache: { at: 1, rows: [] }, cocoMetaCache: { at: 1, byId: {} }, metaCache: {},
+    soilGood: { stations: [], wx: [], coco: [] }, soilCache: { at: 1, ttl: 1, payload: { stations: [] } },
+    ledger: { month: "2026-09", requests: 3, datapoints: 40 }, trailCache: { at: 1, list: [] }
+  };
+  const u = unpackStore(good);
+  eq("a good store unpacks every section", Object.values(u).every((v) => v !== null), true);
+  eq("the ledger comes back intact", u.ledger, good.ledger);
+  eq("a foreign version is refused whole", unpackStore(Object.assign({}, good, { v: 2 })), null);
+  eq("garbage is refused whole", [unpackStore(null), unpackStore("x"), unpackStore([])], [null, null, null]);
+  const partial = unpackStore(Object.assign({}, good, { wxStore: { byId: "nope" }, ledger: { month: 9, requests: "3" } }));
+  eq("a broken wx section is dropped alone", partial.wxStore, null);
+  eq("a broken ledger is dropped alone", partial.ledger, null);
+  eq("the healthy sections beside them survive", partial.cocoCache, good.cocoCache);
+}
+
 if (problems.length) {
   console.error("FAIL\n\n" + problems.join("\n\n"));
   process.exit(1);
@@ -207,4 +301,5 @@ if (problems.length) {
 console.log("parsed " + (parsed ? parsed.length : 0) + " trails from index.html: " +
   (parsed || []).map((t) => t.name).join(", "));
 console.log("PASS — locVariants, parseTrails, normaliseMoisture, milesBetween, " +
-  "wxFetchHours, hourKeyMs, mergeHours, pruneHoursBefore, parseWxHours, minutesOr");
+  "wxFetchHours, hourKeyMs, mergeHours, pruneHoursBefore, parseWxHours, minutesOr, " +
+  "monthWindow, paceSpacingMs, proratedBudget, isQuotaError, failFloorMs, intOr, unpackStore");
