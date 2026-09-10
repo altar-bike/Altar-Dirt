@@ -6,7 +6,11 @@
    Endpoints:
      POST /                → store ratings (body: JSON array, text/plain)
      GET  /export.csv?token=… → CSV of all ratings (EXPORT_TOKEN required)
-     GET  /health          → { ok, count }
+     GET  /health          → { ok, count }  (always 200 — liveness)
+     GET  /status          → freshness of every CLOUDS feed, the month's
+                             quota ledger, recent upstream errors.
+                             503 when the measured data has gone stale,
+                             so a free uptime pinger can raise the alarm.
 
    Env vars:
      PORT          provided by Railway
@@ -17,6 +21,10 @@
      CREW          comma-separated reporter names Matt trusts,
                    case-insensitive ("Matt, Sarah C, Dave").
                    Sets the known_crew column in the export.
+     CLOUDS_REQ_BUDGET / CLOUDS_DP_BUDGET
+                   monthly ceilings for CLOUDS requests and datapoints
+                   (defaults 1700 / 250000 — under the public tier's
+                   2,000 / 300,000). See "CLOUDS budget" below.
    ============================================================ */
 
 "use strict";
@@ -159,7 +167,9 @@ function rateLimited(ip) {
                   the TTL for a few minutes without a code change.
    ============================================================ */
 
-const CLOUDS_URL = "https://api.climate.ncsu.edu/data.php";
+/* Env-overridable so the harvest path can be run against a stand-in
+   upstream in a local check; production never sets it. */
+const CLOUDS_URL = process.env.CLOUDS_URL || "https://api.climate.ncsu.edu/data.php";
 const CLOUDS_HASH = process.env.CLOUDS_HASH || "";
 
 /* Soil sensors. USCRN is the US Climate Reference Network — research
@@ -280,6 +290,145 @@ let soilCache = { at: 0, ttl: 0, payload: null };
 let soilGood = null;       /* last harvest that actually carried data */
 let soilInflight = null;   /* single-flight: concurrent misses share one harvest */
 let metaCache = {};   // keyed by loc
+/* Station coordinates change about never. This was 24h while the map
+   lived in process memory; now that it survives restarts on disk a week
+   is plenty, and each lookup is a REQUEST against the monthly cap. */
+const META_TTL = 7 * 24 * 3600 * 1000;
+/* A hung upstream call used to hang the single-flight harvest with it —
+   every /soil after that waited on a promise that would never settle,
+   until the next deploy. Give CLOUDS a generous minute and then move on. */
+const CLOUDS_TIMEOUT_MS = 60 * 1000;
+
+/* ==================== CLOUDS budget ====================
+   Two caps bind on the public tier (api.climate.ncsu.edu/usage, read
+   10 Sep 2026): 300,000 DATAPOINTS a month and 2,000 REQUESTS a month,
+   both reset at the start of the month. The datapoint cap is the one
+   that bit on 5-6 Aug; the request cap is the one this service was
+   quietly closest to — a round is one query per network (two soil,
+   three wx) plus CoCoRaHS and the odd metadata lookup, so hourly
+   visitor-driven refreshes would have run ~3,600 requests a month.
+
+   The ledger counts what this process has spent this month; the pacer
+   spaces rounds so the budget lasts the month: spacing = time left in
+   the month / rounds the remaining requests can still buy. At the
+   default budget that is one round every ~2.2 hours, visitors or not
+   (the keep-warm tick below spends it evenly so the page never waits
+   on a fetch). Budgets default to 1,700 requests and 250k datapoints —
+   under the caps, so the datapoint count being an ESTIMATE (params x
+   stations x intervals, the policy page's own formula) costs nothing.
+   A CLOUDS reply that names the quota parks upstream fetching for a day
+   at a time and the store keeps serving; the month rolling over clears
+   it. Both budgets are env-tunable; raising CLOUDS_REQ_BUDGET is how
+   to buy fresher measured rain if the tier ever grows.
+   ======================================================= */
+function intOr(raw, def) {
+  const n = parseInt(raw, 10);
+  return isFinite(n) && n > 0 ? n : def;
+}
+const REQ_BUDGET = intOr(process.env.CLOUDS_REQ_BUDGET, 1700);
+const DP_BUDGET = intOr(process.env.CLOUDS_DP_BUDGET, 250000);
+let ledger = { month: "", startedMs: 0, requests: 0, datapoints: 0, failures: 0, blockedUntil: 0, lastRoundMs: 0, lastRoundDp: 0 };
+const lastErrors = [];   /* newest first, capped; /status shows them */
+function noteError(where, msg) {
+  lastErrors.unshift({ at: new Date().toISOString(), where: where, error: String(msg).slice(0, 240) });
+  if (lastErrors.length > 8) lastErrors.length = 8;
+}
+
+/* CLOUDS resets "at the beginning of each month". NCSU is Eastern, so
+   that lands at 04:00 or 05:00 UTC; roll our month at 05:00 UTC on the
+   1st, after theirs has certainly happened. Pure — the tests lift it. */
+function monthWindow(nowMs) {
+  const d = new Date(nowMs);
+  let y = d.getUTCFullYear(), m = d.getUTCMonth();
+  if (nowMs < Date.UTC(y, m, 1, 5)) m -= 1;
+  const startMs = Date.UTC(y, m, 1, 5), endMs = Date.UTC(y, m + 1, 1, 5);
+  return { key: new Date(startMs).toISOString().slice(0, 7), startMs: startMs, endMs: endMs };
+}
+
+/* A ledger that starts mid-month (first deploy of this code, or a lost
+   volume) cannot know what the month has already spent, so it assumes
+   its share is gone and budgets only the fraction of the month that is
+   left. A ledger that rolled over at the boundary gets the whole month.
+   Pure. */
+function proratedBudget(budget, startedMs, startMs, endMs) {
+  if (!startedMs || startedMs <= startMs) return budget;
+  if (startedMs >= endMs) return 0;
+  return Math.floor(budget * (endMs - startedMs) / (endMs - startMs));
+}
+
+/* Milliseconds between rounds so the requests left in the budget last
+   until the month ends. Infinity when another round no longer fits. Pure. */
+function paceSpacingMs(requestsUsed, reqBudget, reqPerRound, nowMs, endMs) {
+  const left = reqBudget - requestsUsed;
+  if (reqPerRound <= 0 || left < reqPerRound) return Infinity;
+  return Math.max(0, (endMs - nowMs) / Math.floor(left / reqPerRound));
+}
+
+/* A quota rejection reads differently from a timeout and must be
+   treated differently: retrying it burns a failed call and learns
+   nothing. Conservative on purpose — the 25k-per-request cap is not a
+   month-long condition and must not park the feed. Pure. */
+function isQuotaError(msg) {
+  const s = String(msg || "");
+  if (/per request/i.test(s)) return false;
+  return /quota|exceed|(data ?points?|requests?)[^.]{0,40}limit|limit[^.]{0,40}(data ?points?|requests?)/i.test(s);
+}
+
+/* Back off after a failed wx round: 5, 10, 20, 40 minutes, capped at an
+   hour. Until 10 Sep 2026 a failed round left the floor unset, so every
+   visitor re-hit a broken upstream. Pure. */
+function failFloorMs(streak) {
+  return Math.min(60, 5 * Math.pow(2, Math.max(0, streak - 1))) * 60000;
+}
+
+function rollLedger(nowMs) {
+  const w = monthWindow(nowMs);
+  if (ledger.month !== w.key) {
+    if (ledger.month) {
+      console.log("clouds budget: " + ledger.month + " closed at " + ledger.requests +
+        " requests, " + ledger.datapoints + " datapoints, " + ledger.failures + " failed calls");
+    }
+    /* Rolling over from a known month means nothing has been spent in
+       the new one; a first-ever ledger only knows about now. */
+    const startedMs = ledger.month ? w.startMs : nowMs;
+    ledger = { month: w.key, startedMs: startedMs, requests: 0, datapoints: 0, failures: 0, blockedUntil: 0,
+               lastRoundMs: ledger.lastRoundMs || 0, lastRoundDp: ledger.lastRoundDp || 0 };
+  }
+  return w;
+}
+function reqBudgetNow(w) { return proratedBudget(REQ_BUDGET, ledger.startedMs, w.startMs, w.endMs); }
+function dpBudgetNow(w) { return proratedBudget(DP_BUDGET, ledger.startedMs, w.startMs, w.endMs); }
+
+/* The one question asked before every round: may we go upstream now? */
+function mayFetch(nowMs, reqPerRound) {
+  const w = rollLedger(nowMs);
+  if (ledger.blockedUntil > nowMs) {
+    return { ok: false, why: "quota lockout until " + new Date(ledger.blockedUntil).toISOString() };
+  }
+  const reqBudget = reqBudgetNow(w), dpBudget = dpBudgetNow(w);
+  if (ledger.requests + reqPerRound > reqBudget) {
+    return { ok: false, why: "request budget spent (" + ledger.requests + "/" + reqBudget + ")" };
+  }
+  if (ledger.datapoints + ledger.lastRoundDp > dpBudget) {
+    return { ok: false, why: "datapoint budget spent (" + ledger.datapoints + "/" + dpBudget + ")" };
+  }
+  const spacing = paceSpacingMs(ledger.requests, reqBudget, reqPerRound, nowMs, w.endMs);
+  const waitMs = ledger.lastRoundMs + spacing - nowMs;
+  if (waitMs > 0) return { ok: false, why: "pacing", waitMs: waitMs };
+  return { ok: true };
+}
+
+function budgetLine() {
+  const now = Date.now(), w = rollLedger(now);
+  const pct = Math.round(100 * (now - w.startMs) / (w.endMs - w.startMs));
+  const prorated = reqBudgetNow(w) !== REQ_BUDGET;
+  return "clouds budget: " + ledger.month + " — " + ledger.requests + " of " + reqBudgetNow(w) +
+    " requests, " + ledger.datapoints + " of " + dpBudgetNow(w) + " datapoints" +
+    (prorated ? " (prorated: ledger began " + new Date(ledger.startedMs).toISOString().slice(0, 10) + ")" : "") +
+    ", " + pct + "% of month elapsed" +
+    (ledger.failures ? ", " + ledger.failures + " failed calls" : "") +
+    (ledger.blockedUntil > now ? ", LOCKED OUT until " + new Date(ledger.blockedUntil).toISOString() : "");
+}
 
 function cloudsUrl(extra) {
   const u = new URL(CLOUDS_URL);
@@ -380,7 +529,10 @@ function harvest(node, ctxId, out) {
 }
 
 async function cloudsJson(url) {
-  const r = await fetch(url, { headers: { "User-Agent": "AltarCycles-TrailConditions" } });
+  const r = await fetch(url, {
+    headers: { "User-Agent": "AltarCycles-TrailConditions" },
+    signal: AbortSignal.timeout(CLOUDS_TIMEOUT_MS)
+  });
   const text = await r.text();
   if (!r.ok) {
     /* Surface WHY. CLOUDS 400s share one generic message ("Uh oh, there
@@ -400,6 +552,42 @@ async function cloudsJson(url) {
   }
   try { return JSON.parse(text); }
   catch (e) { throw new Error("CLOUDS returned non-JSON (" + text.slice(0, 80) + ")"); }
+}
+
+/* Every upstream call goes through here so the ledger sees it.
+   `dpPerLocation` is params x intervals for the request; the reply says
+   how many locations answered. Metadata lookups pass 0 — the policy
+   page's formula does not price them — but still count as a request. */
+async function cloudsData(extra, dpPerLocation) {
+  rollLedger(Date.now());
+  /* Set mid-round by an earlier call: the rest of the round would only
+     add failed calls to CLOUDS' count and noise to ours. */
+  if (ledger.blockedUntil > Date.now()) {
+    throw new Error("CLOUDS paused — quota lockout until " + new Date(ledger.blockedUntil).toISOString());
+  }
+  const isMeta = extra && extra.type === "meta";
+  const where = (isMeta ? "meta:" : "data:") + String((extra && extra.loc) || CLOUDS_LOC).split(";")[0].replace("type=", "");
+  let j;
+  try { j = await cloudsJson(cloudsUrl(extra)); }
+  catch (e) {
+    ledger.failures++;
+    noteError(where, e.message || e);
+    if (isQuotaError(e.message)) {
+      /* Park for a day at a time, not the rest of the month: if the
+         limit was raised, or this was misread, one probe a day finds out. */
+      ledger.blockedUntil = Math.min(monthWindow(Date.now()).endMs, Date.now() + 24 * 3600000);
+      console.log("clouds quota rejection — upstream paused until " +
+        new Date(ledger.blockedUntil).toISOString() + ": " + e.message);
+    }
+    saveStoreSoon();
+    throw e;
+  }
+  const locs = isMeta
+    ? Object.keys((j.metadata && j.metadata.location) || j.location || {}).length
+    : Object.keys(j.data || {}).length;
+  ledger.requests++;
+  ledger.datapoints += Math.round(locs * (dpPerLocation || 0));
+  return j;
 }
 
 /* Split `type=A,B,C` into one request per network and merge, keeping the
@@ -434,10 +622,10 @@ function locVariants(loc) {
 /* Station coordinates change rarely; hold them for a day. */
 async function stationMeta(loc, vars) {
   const hit = metaCache[loc];
-  if (hit && Date.now() - hit.at < 24 * 3600 * 1000) return hit.byId;
+  if (hit && Date.now() - hit.at < META_TTL) return hit.byId;
   const out = {};
   try {
-    harvest(await cloudsJson(cloudsUrl({ type: "meta", loc: loc, var: vars })), null, out);
+    harvest(await cloudsData({ type: "meta", loc: loc, var: vars }, 0), null, out);
   } catch (e) {
     /* One failed metadata call used to cache an EMPTY coordinate map for
        24 hours, which dropped every gauge in the network as ":nocoords"
@@ -454,6 +642,7 @@ async function stationMeta(loc, vars) {
      map, cold or warm. */
   if (!Object.keys(out).length) return hit ? hit.byId : out;
   metaCache[loc] = { at: Date.now(), byId: out };
+  saveStoreSoon();
   return out;
 }
 
@@ -496,7 +685,9 @@ let wxStore = {
   newestKey: {},    /* per loc variant: that newest hour key */
   seenIds: {},      /* every station id ever seen in a response (backfill trigger) */
   byId: {},         /* per station: { hours } */
-  lastFetchMs: 0    /* wall time of the last round that reached upstream */
+  lastFetchMs: 0,   /* wall time of the last round that reached upstream */
+  failStreak: 0,    /* consecutive rounds where NO network answered */
+  failUntilMs: 0    /* back-off floor after such a round (failFloorMs) */
 };
 
 /* Hours to request for one network, given when IT last succeeded.
@@ -583,6 +774,17 @@ async function wxSeries(dropped) {
   if (wxStore.lastFetchMs && nowMs - wxStore.lastFetchMs < WX_MIN_INTERVAL) {
     return wxPayload(dropped);
   }
+  /* After a round where every network failed, wait before asking again.
+     Without this the failed round left lastFetchMs alone, so every
+     visitor during an outage re-hit upstream three times (5-10 Sep 2026
+     ran five days that way). The store keeps serving meanwhile. */
+  if (wxStore.failUntilMs && nowMs < wxStore.failUntilMs) {
+    if (dropped) {
+      dropped.push("wx:backing off after " + wxStore.failStreak + " failed round" +
+        (wxStore.failStreak === 1 ? "" : "s") + ", retry " + new Date(wxStore.failUntilMs).toISOString());
+    }
+    return wxPayload(dropped);
+  }
   const askLog = [];
   let reachedUpstream = false;
   for (const loc of locVariants(CLOUDS_WX_LOC)) {
@@ -592,13 +794,16 @@ async function wxSeries(dropped) {
     /* One network being down must not cost us the other two — and its
        own cursor stays parked so its gap is re-covered next time. */
     try {
-      j = await cloudsJson(cloudsUrl({
+      j = await cloudsData({
         loc: loc, var: WX_VARS.join(","),
         start: "-" + askH + " hours", end: "now", int: "1 hour", obtype: "H"
-      }));
+      }, WX_VARS.length * askH);
     } catch (e) {
       if (dropped) dropped.push("query:" + label + ":" + String(e.message || e).slice(0, 240));
-      askLog.push(label + " failed");
+      /* The reason goes in the log line too. Five days of "RAWS failed"
+         in Sep 2026 were undiagnosable afterwards because the reason
+         lived only in a payload nobody fetched. */
+      askLog.push(label + " failed (" + String(e.message || e).replace(/\s+/g, " ").slice(0, 140) + ")");
       continue;
     }
     reachedUpstream = true;
@@ -614,10 +819,10 @@ async function wxSeries(dropped) {
       const news = Object.keys(data).filter(function (id) { return !wxStore.seenIds[id]; });
       if (news.length) {
         try {
-          j = await cloudsJson(cloudsUrl({
+          j = await cloudsData({
             loc: loc, var: WX_VARS.join(","),
             start: "-" + WX_WINDOW_H + " hours", end: "now", int: "1 hour", obtype: "H"
-          }));
+          }, WX_VARS.length * WX_WINDOW_H);
           data = j.data || {};
           askH = WX_WINDOW_H;
         } catch (e) {
@@ -655,7 +860,14 @@ async function wxSeries(dropped) {
     }
     askLog.push(label + " " + askH + "h");
   }
-  if (reachedUpstream) wxStore.lastFetchMs = nowMs;
+  if (reachedUpstream) {
+    wxStore.lastFetchMs = nowMs;
+    wxStore.failStreak = 0;
+    wxStore.failUntilMs = 0;
+  } else {
+    wxStore.failStreak = (wxStore.failStreak || 0) + 1;
+    wxStore.failUntilMs = nowMs + failFloorMs(wxStore.failStreak);
+  }
 
   /* Age the whole store against the fleet's newest reading, then let
      anything with no hours left fall away. The newest is clamped to a
@@ -680,7 +892,9 @@ async function wxSeries(dropped) {
     }
   }
   console.log("wx delta: " + (askLog.join(", ") || "no networks") + "; " +
-    Object.keys(wxStore.byId).length + " gauges in store");
+    Object.keys(wxStore.byId).length + " gauges in store" +
+    (reachedUpstream ? "" : "; backing off " + Math.round(failFloorMs(wxStore.failStreak) / 60000) + " min"));
+  saveStoreSoon();
 
   return wxPayload(dropped);
 }
@@ -711,10 +925,10 @@ async function wxPayload(dropped) {
    rather than a loosened regex that would let county names through. */
 let cocoMetaCache = { at: 0, byId: null };
 async function cocoMeta() {
-  if (cocoMetaCache.byId && Date.now() - cocoMetaCache.at < 24 * 3600 * 1000) return cocoMetaCache.byId;
+  if (cocoMetaCache.byId && Date.now() - cocoMetaCache.at < META_TTL) return cocoMetaCache.byId;
   const byId = {};
   try {
-    const j = await cloudsJson(cloudsUrl({ type: "meta", loc: CLOUDS_COCO_LOC, var: "precip" }));
+    const j = await cloudsData({ type: "meta", loc: CLOUDS_COCO_LOC, var: "precip" }, 0);
     const loc = (j.metadata && j.metadata.location) || j.location || {};
     for (const id of Object.keys(loc)) {
       const s = loc[id] || {};
@@ -731,6 +945,7 @@ async function cocoMeta() {
   }
   if (!Object.keys(byId).length) return cocoMetaCache.byId || byId;
   cocoMetaCache = { at: Date.now(), byId: byId };
+  saveStoreSoon();
   return byId;
 }
 
@@ -742,7 +957,7 @@ async function cocoSeries(dropped) {
   if (cocoCache.rows && Date.now() - cocoCache.at < COCO_TTL) return cocoCache.rows;
   let j;
   try {
-    j = await cloudsJson(cloudsUrl({
+    j = await cloudsData({
       loc: CLOUDS_COCO_LOC, var: "precip",
       /* Two days of daily rows: tolerant of an observer who is a day
          behind (the freshest-numeric pick below handles that). This was
@@ -750,9 +965,10 @@ async function cocoSeries(dropped) {
          already hides readings older than two days, so days three and
          four were rows nobody could ever see: pure row cost. */
       start: "-2 days", end: "now", int: "1 day", obtype: "D", metadata: "no"
-    }));
+    }, 1 * 2);
   } catch (e) {
     if (dropped) dropped.push("coco:" + String(e.message || e).slice(0, 60));
+    console.log("coco refetch failed: " + String(e.message || e).replace(/\s+/g, " ").slice(0, 160));
     /* Serve yesterday's volunteers over none — their rows are dated, so
        the page's wording stays honest even when this cache is old. */
     return cocoCache.rows || [];
@@ -798,12 +1014,28 @@ async function cocoSeries(dropped) {
      ids means the selector or the key is wrong, ids-without-numbers means
      the window or obtype is wrong, all-unplaced means the metadata call
      is failing. */
-  if (!out.length && dropped) {
+  if (!out.length) {
     const ids = Object.keys(data).length;
-    if (!ids) dropped.push("coco:upstream returned no observers for the selector");
-    else if (noNumber >= ids) dropped.push("coco:" + ids + " observers, none with a numeric daily total");
-    else dropped.push("coco:" + ids + " observers returned, none usable (" +
-                      noNumber + " without a number, " + unplaced + " without coordinates)");
+    let why;
+    if (!ids) why = "coco:upstream returned no observers for the selector";
+    else if (noNumber >= ids) why = "coco:" + ids + " observers, none with a numeric daily total";
+    else why = "coco:" + ids + " observers returned, none usable (" +
+               noNumber + " without a number, " + unplaced + " without coordinates)";
+    if (dropped) dropped.push(why);
+    /* Log what actually came back — the first few ids with their dated
+       raw values — so "none with a number" can be told apart from
+       "upstream has published nothing since <date>" without a key. On
+       10 Sep 2026 the live payload said exactly this for six days and
+       the rows it was masking were dated 2 Sep; nobody could tell why. */
+    const peek = Object.keys(data).slice(0, 3).map(function (id) {
+      const byDate = data[id] || {};
+      return id + "{" + Object.keys(byDate).sort().map(function (d) {
+        return d + "=" + JSON.stringify(unwrap((byDate[d] || {}).precip));
+      }).join(",") + "}";
+    }).join(" ");
+    console.log("coco refetch: " + why.slice(5) + (peek ? "; sample " + peek.slice(0, 300) : "") +
+      (cocoCache.rows ? "; serving " + cocoCache.rows.length + " cached rows from " +
+        new Date(cocoCache.at).toISOString().slice(0, 10) : ""));
   }
   /* Same rule as every other cache here: never bank an empty result
      over a populated one. An empty fetch keeps the old rows serving and
@@ -811,6 +1043,7 @@ async function cocoSeries(dropped) {
   if (out.length) {
     cocoCache = { at: Date.now(), rows: out };
     console.log("coco refetch: " + out.length + " observers");
+    saveStoreSoon();
     return out;
   }
   return cocoCache.rows || out;
@@ -1020,14 +1253,29 @@ function gradeSummary() {
 }
 
 async function soilPayload() {
-  if (soilCache.payload && Date.now() - soilCache.at < soilCache.ttl) return soilCache.payload;
+  const now = Date.now();
+  if (soilCache.payload && now - soilCache.at < soilCache.ttl) return soilCache.payload;
   if (!CLOUDS_HASH) return { stations: [], wx: [], coco: [], note: "CLOUDS_HASH not set" };
   /* Single flight. Without this, every request that lands on an expired
      cache fires its own six-query CLOUDS burst — under load that
      multiplies quota burn by the number of concurrent visitors, at the
      exact moment (TTL boundary) they pile up. */
   if (soilInflight) return soilInflight;
-  soilInflight = soilHarvest().finally(function () { soilInflight = null; });
+  /* The pacer decides whether a round fits the month's budget. When it
+     says no, the cache serves: stale is honest here — the page words
+     rain by the data's own timestamps — and /status says why and for
+     how long. This is the whole quota guarantee; nothing reaches
+     upstream around it except /soil/raw, which is token-gated. */
+  const gate = mayFetch(now, roundRequests());
+  if (!gate.ok) {
+    if (soilCache.payload) return soilCache.payload;
+    if (soilGood) return soilGood;
+    return { stations: [], wx: [], coco: [], note: "clouds paused: " + gate.why };
+  }
+  ledger.lastRoundMs = now;
+  soilInflight = soilHarvest()
+    .then(function (p) { saveStoreSoon(); return p; })
+    .finally(function () { soilInflight = null; });
   return soilInflight;
 }
 
@@ -1036,9 +1284,10 @@ async function soilHarvest() {
   /* One network per query, same as the rain feed: USCRN being slow
      should not take ECONet's readings down with it. */
   const data = {}, meta = {}, dropped = [];
+  const reqBefore = ledger.requests, dpBefore = ledger.datapoints;
   for (const loc of locVariants(CLOUDS_LOC)) {
     try {
-      harvest(await cloudsJson(cloudsUrl({ loc: loc, var: SOIL_VARS.join(","), data_limit: "last" })), null, data);
+      harvest(await cloudsData({ loc: loc, var: SOIL_VARS.join(","), data_limit: "last" }, SOIL_VARS.length * 6), null, data);
       Object.assign(meta, await stationMeta(loc, SOIL_VARS.join(",")));
     } catch (e) {
       /* Keep the upstream reason. "query:type=ECONET" alone cannot tell
@@ -1108,6 +1357,18 @@ async function soilHarvest() {
   let coco = [];
   try { coco = await cocoSeries(dropped); } catch (e) { dropped.push("coco:" + String(e.message || e).slice(0, 60)); }
 
+  /* One line per round with what it cost. The `wx delta` and `coco
+     refetch` lines above say what each feed did; this one says what the
+     round did to the month. `dropped` rides along so a bad round names
+     its reasons in the log, not only in a payload nobody fetched. */
+  const reqUsed = ledger.requests - reqBefore, dpUsed = ledger.datapoints - dpBefore;
+  if (reqUsed > 0) ledger.lastRoundDp = dpUsed;
+  console.log("clouds round: " + stations.length + " stations, " + wx.length + " gauges, " +
+    coco.length + " coco; +" + reqUsed + " req, +" + dpUsed + " dp; month " +
+    ledger.requests + "/" + reqBudgetNow(monthWindow(Date.now())) + " req, " +
+    ledger.datapoints + "/" + dpBudgetNow(monthWindow(Date.now())) + " dp" +
+    (dropped.length ? "; dropped: " + dropped.join(" | ").replace(/\s+/g, " ").slice(0, 600) : ""));
+
   /* `dropped` is the tell for a truncated upstream response. It is in the
      payload rather than only in the logs so a bad day is one fetch away
      from being visible, not a log search. */
@@ -1156,6 +1417,184 @@ async function soilHarvest() {
   return payload;
 }
 
+/* ==================== the store on disk ====================
+   Everything fetched from CLOUDS lived only in process memory — the
+   72-hour wx window, the CoCoRaHS rows, station coordinates, the last
+   soil payload. A deploy threw all of it away: every boot re-pulled 72
+   hours for three networks (~9,500 datapoints, six requests), the first
+   visitor after a deploy waited on that pull (79 seconds on 10 Sep
+   2026), and the budget ledger above would have restarted from zero on
+   every restart, which is the one thing a monthly ledger must not do.
+   The volume at DATA_DIR already holds the ratings; it holds this too.
+   Written atomically (tmp, then rename) a couple of seconds after any
+   round that changed something, and on SIGTERM. A missing or unreadable
+   file is a cold boot — the old behaviour, nothing worse.
+   ======================================================= */
+const STORE_FILE = path.join(DATA_DIR, "clouds-store.json");
+const STORE_V = 1;
+let storeTimer = null;
+
+function packStore() {
+  return {
+    v: STORE_V, savedAt: new Date().toISOString(),
+    wxStore: wxStore, cocoCache: cocoCache, cocoMetaCache: cocoMetaCache, metaCache: metaCache,
+    soilGood: soilGood, soilCache: soilCache, ledger: ledger, trailCache: trailCache
+  };
+}
+
+/* Shape-check each section on its own: one bad section costs that
+   section a cold start, not the whole store. Pure — the tests lift it. */
+function unpackStore(raw) {
+  if (!raw || typeof raw !== "object" || raw.v !== 1) return null;
+  const obj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+  return {
+    wxStore: obj(raw.wxStore) && obj(raw.wxStore.byId) ? raw.wxStore : null,
+    cocoCache: obj(raw.cocoCache) && Array.isArray(raw.cocoCache.rows) ? raw.cocoCache : null,
+    cocoMetaCache: obj(raw.cocoMetaCache) && obj(raw.cocoMetaCache.byId) ? raw.cocoMetaCache : null,
+    metaCache: obj(raw.metaCache) ? raw.metaCache : null,
+    soilGood: obj(raw.soilGood) && Array.isArray(raw.soilGood.stations) ? raw.soilGood : null,
+    soilCache: obj(raw.soilCache) && obj(raw.soilCache.payload) && typeof raw.soilCache.at === "number" ? raw.soilCache : null,
+    ledger: obj(raw.ledger) && typeof raw.ledger.requests === "number" && typeof raw.ledger.month === "string" ? raw.ledger : null,
+    trailCache: obj(raw.trailCache) && Array.isArray(raw.trailCache.list) ? raw.trailCache : null
+  };
+}
+
+function loadStore() {
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(STORE_FILE, "utf8")); }
+  catch (e) { return "cold: no readable store at " + STORE_FILE; }
+  const s = unpackStore(raw);
+  if (!s) return "cold: store at " + STORE_FILE + " is v" + (raw && raw.v) + ", wanted v" + STORE_V;
+  if (s.wxStore) {
+    wxStore = Object.assign({ fetchedAt: {}, newestKey: {}, seenIds: {}, byId: {},
+                              lastFetchMs: 0, failStreak: 0, failUntilMs: 0 }, s.wxStore);
+  }
+  if (s.cocoCache) cocoCache = s.cocoCache;
+  if (s.cocoMetaCache) cocoMetaCache = s.cocoMetaCache;
+  if (s.metaCache) metaCache = s.metaCache;
+  if (s.soilGood) soilGood = s.soilGood;
+  if (s.soilCache) soilCache = s.soilCache;
+  if (s.ledger) ledger = Object.assign({ startedMs: 0, failures: 0, blockedUntil: 0, lastRoundMs: 0, lastRoundDp: 0 }, s.ledger);
+  if (s.trailCache) trailCache = s.trailCache;
+  return "warm: saved " + raw.savedAt + ", " + Object.keys(wxStore.byId).length + " gauges, " +
+    (cocoCache.rows || []).length + " coco rows, soil payload " +
+    (soilCache.payload ? "from " + soilCache.payload.fetched : "none") +
+    ", ledger " + ledger.month + " at " + ledger.requests + " req / " + ledger.datapoints + " dp";
+}
+
+function saveStoreNow() {
+  if (storeTimer) { clearTimeout(storeTimer); storeTimer = null; }
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(STORE_FILE + ".tmp", JSON.stringify(packStore()));
+    fs.renameSync(STORE_FILE + ".tmp", STORE_FILE);
+  } catch (e) { console.log("store save failed: " + (e && e.message)); }
+}
+function saveStoreSoon() {
+  if (storeTimer) return;
+  storeTimer = setTimeout(function () { storeTimer = null; saveStoreNow(); }, 2000);
+  if (storeTimer.unref) storeTimer.unref();
+}
+
+/* Requests one round will make: one per network for soil and wx, plus
+   CoCoRaHS when its cache has expired. Metadata lookups are rare (a
+   week apart) and left out of the spacing; the ledger still counts them. */
+function roundRequests() {
+  const cocoDue = !(cocoCache.rows && Date.now() - cocoCache.at < COCO_TTL);
+  return locVariants(CLOUDS_LOC).length + locVariants(CLOUDS_WX_LOC).length + (cocoDue ? 1 : 0);
+}
+
+/* What /status says. `ok` is about OUR data being current — soil
+   payload under 6h old, rain gauges reached inside 12h — because those
+   are the conditions a pinger should wake someone for. CoCoRaHS going
+   quiet and a budget pause are warnings: real, worth reading, not worth
+   an alarm (CoCoRaHS went quiet for a week in Sep 2026 through no fault
+   of ours). Ages are wall-clock ages of OUR fetches, never CLOUDS
+   timestamps against our clock — see the timezone note in soilHarvest. */
+function statusReport() {
+  const now = Date.now();
+  const w = rollLedger(now);
+  let newestHour = "";
+  for (const id of Object.keys(wxStore.byId)) {
+    for (const k of Object.keys(wxStore.byId[id].hours || {})) if (k > newestHour) newestHour = k;
+  }
+  const minsAgo = (ms) => (ms ? Math.round((now - ms) / 60000) : null);
+  /* Freshness is the age of the last payload that CARRIED STATIONS
+     (soilGood), not of the last round: a round that fails upstream still
+     caches a station-less payload on the short TTL, and judging by that
+     stamp made a dead upstream look fresh in the 10 Sep local check. */
+  const goodMs = soilGood && soilGood.fetched ? Date.parse(soilGood.fetched) : 0;
+  const soilAge = minsAgo(goodMs), wxAge = minsAgo(wxStore.lastFetchMs), cocoAge = minsAgo(cocoCache.at);
+  const stationsNow = soilCache.payload ? (soilCache.payload.stations || []).length : 0;
+  const cocoDates = (cocoCache.rows || []).map((r) => r.date).filter(Boolean).sort();
+  const cocoNewest = cocoDates.length ? cocoDates[cocoDates.length - 1] : null;
+  const gate = mayFetch(now, roundRequests());
+  const problems = [], warnings = [];
+  if (!CLOUDS_HASH) problems.push("CLOUDS_HASH not set — no measured data at all");
+  else {
+    if (soilAge === null) problems.push("no soil stations yet");
+    else if (soilAge > 6 * 60) problems.push("last soil stations are " + soilAge + " min old");
+    if (wxAge === null) problems.push("rain gauges never reached");
+    else if (wxAge > 12 * 60) problems.push("rain gauges last reached " + wxAge + " min ago");
+    if (soilCache.payload && soilCache.payload.degraded) warnings.push("serving last good soil payload");
+    else if (soilCache.payload && !stationsNow && soilAge !== null) warnings.push("latest round returned no soil stations; page shows none");
+    const cutoff = new Date(now - 3 * 86400000).toISOString().slice(0, 10);
+    if (!cocoNewest) warnings.push("no CoCoRaHS rows");
+    else if (cocoNewest < cutoff) {
+      warnings.push("CoCoRaHS newest row is " + cocoNewest +
+        " — the page hides rows over two days old, so the cross-check is off");
+    }
+    if (ledger.blockedUntil > now) warnings.push("CLOUDS quota lockout until " + new Date(ledger.blockedUntil).toISOString());
+    else if (!gate.ok && gate.why !== "pacing") warnings.push("upstream paused: " + gate.why);
+    if (wxStore.failStreak) warnings.push(wxStore.failStreak + " consecutive failed rain rounds");
+  }
+  return {
+    ok: !problems.length, problems: problems, warnings: warnings,
+    soil: {
+      fetched: soilCache.payload ? soilCache.payload.fetched : null,
+      lastStationsAt: goodMs ? soilGood.fetched : null, lastStationsAgeMin: soilAge,
+      stations: stationsNow,
+      degraded: !!(soilCache.payload && soilCache.payload.degraded),
+      dropped: (soilCache.payload && soilCache.payload.dropped) || []
+    },
+    wx: {
+      gauges: Object.keys(wxStore.byId).length, newestHour: newestHour || null,
+      lastReachedMin: wxAge, failStreak: wxStore.failStreak || 0
+    },
+    coco: { observers: (cocoCache.rows || []).length, newestDate: cocoNewest, fetchedMin: cocoAge },
+    budget: {
+      month: ledger.month, requests: ledger.requests, requestBudget: reqBudgetNow(w),
+      datapoints: ledger.datapoints, datapointBudget: dpBudgetNow(w), failedCalls: ledger.failures,
+      configured: { requests: REQ_BUDGET, datapoints: DP_BUDGET },
+      ledgerBegan: ledger.startedMs ? new Date(ledger.startedMs).toISOString() : null,
+      monthElapsedPct: Math.round(100 * (now - w.startMs) / (w.endMs - w.startMs)),
+      lockedUntil: ledger.blockedUntil > now ? new Date(ledger.blockedUntil).toISOString() : null
+    },
+    nextRound: gate.ok ? "allowed now" : (gate.why + (gate.waitMs ? " — " + Math.ceil(gate.waitMs / 60000) + " min" : "")),
+    lastErrors: lastErrors, ratings: readAll().length, uptimeMin: Math.round(process.uptime() / 60)
+  };
+}
+
+/* Keep the store warm on the budget's own cadence, visitors or not.
+   Ticks every minute; a round only actually happens when the cache is
+   past its TTL AND the pacer says it fits — so with nobody looking the
+   data is still never more than ~2 hours behind, and the first visitor
+   after a quiet week gets a warm payload in milliseconds instead of a
+   72-hour re-pull. CLAUDE.md asked for exactly this: "warm the cache on
+   boot rather than making the first visitor pay." Also prints the
+   budget line once a day so the month's spend is in the deploy log. */
+let budgetLoggedMs = 0;
+function scheduleKeepWarm() {
+  const tick = function () {
+    const now = Date.now();
+    if (now - budgetLoggedMs > 24 * 3600000) { budgetLoggedMs = now; console.log(budgetLine()); }
+    if (soilCache.payload && now - soilCache.at < soilCache.ttl) return;
+    soilPayload().catch(function (e) { console.log("keep-warm round failed: " + (e && e.message)); });
+  };
+  setTimeout(tick, 15 * 1000).unref?.();
+  setInterval(tick, 60 * 1000).unref?.();
+}
+
 /* ------------------------- server ------------------------- */
 
 const server = http.createServer(function (req, res) {
@@ -1174,6 +1613,16 @@ const server = http.createServer(function (req, res) {
     const n = readAll().length;
     res.writeHead(200, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({ ok: true, ratings: n }));
+  }
+
+  /* Liveness is /health (always 200 — the process is up). THIS is
+     whether the data is any good: 503 when the measured feeds have gone
+     stale, so a free uptime pinger pointed here raises the alarm that
+     five silent days in Sep 2026 never did. */
+  if (req.method === "GET" && url.pathname === "/status") {
+    const st = statusReport();
+    res.writeHead(st.ok ? 200 : 503, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    return res.end(JSON.stringify(st));
   }
 
   if (req.method === "GET" && url.pathname === "/export.csv") {
@@ -1231,7 +1680,7 @@ const server = http.createServer(function (req, res) {
       if (v) which[k] = v;
     });
     const section = url.searchParams.get("section");
-    (CLOUDS_HASH ? cloudsJson(cloudsUrl(which)) : Promise.reject(new Error("CLOUDS_HASH not set")))
+    (CLOUDS_HASH ? cloudsData(which, 0) : Promise.reject(new Error("CLOUDS_HASH not set")))
       .then(function (j) {
         /* compact=1 flattens a station-metadata response to one small
            row per station. CLOUDS wraps every field in a {name,value}
@@ -1354,9 +1803,31 @@ const server = http.createServer(function (req, res) {
   res.end("Not found");
 });
 
+const storeState = loadStore();
 server.listen(PORT, function () {
   console.log("feedback service on :" + PORT + ", data at " + DATA_FILE +
     (EXPORT_TOKEN ? "" : "  [WARN: EXPORT_TOKEN not set — export disabled]"));
+  console.log("clouds store " + storeState);
+  /* The effective knobs, because a Railway variable silently wins over
+     every default in this file and nobody can read the variables back
+     through the MCP. */
+  const mins = (ms) => Math.round(ms / 60000) + "m";
+  console.log("clouds config: soil TTL " + mins(SOIL_TTL) + " (fail " + mins(SOIL_FAIL_TTL) + "), wx floor " +
+    mins(WX_MIN_INTERVAL) + ", coco TTL " + mins(COCO_TTL) + ", meta TTL 7d, upstream timeout " +
+    mins(CLOUDS_TIMEOUT_MS) + ", budget " + REQ_BUDGET + " req / " + DP_BUDGET + " dp per month" +
+    (CLOUDS_HASH ? "" : ", CLOUDS_HASH NOT SET") +
+    ["CLOUDS_LOC", "CLOUDS_WX_LOC", "CLOUDS_COCO_LOC"].filter((k) => process.env[k]).map((k) => ", " + k + " set in env").join(""));
+  console.log("clouds selectors: soil [" + CLOUDS_LOC + "] wx [" + CLOUDS_WX_LOC + "] coco [" + CLOUDS_COCO_LOC + "]");
+  console.log(budgetLine());
+  budgetLoggedMs = Date.now();
+});
+
+/* Railway sends SIGTERM before it swaps a deploy in. Flush the store so
+   the next process boots warm, then go. */
+process.on("SIGTERM", function () {
+  saveStoreNow();
+  server.close(function () { process.exit(0); });
+  setTimeout(function () { process.exit(0); }, 3000).unref?.();
 });
 
 /* Grade the forecast daily, in-process. A minute after boot rather than
@@ -1375,5 +1846,5 @@ function scheduleGrading() {
   setTimeout(run, 60 * 1000).unref?.();
   setInterval(run, GRADE_EVERY_MS).unref?.();
 }
-if (CLOUDS_HASH) scheduleGrading();
+if (CLOUDS_HASH) { scheduleGrading(); scheduleKeepWarm(); }
 else console.log("forecast grading off — CLOUDS_HASH not set, no gauges to grade against");
