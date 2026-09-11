@@ -912,9 +912,12 @@ CLOUDS also sends no CORS headers, so a proxy is required regardless.
   on the volume (atomic write, flushed on SIGTERM), so a deploy no
   longer costs a 72-hour re-pull (~9,500 datapoints, six requests) or a
   79-second first request, and the month's count survives restarts.
-  Upstream calls time out after 60s instead of hanging the single-flight
-  harvest, and a round where every wx network fails sets a back-off
-  floor (5 → 60 min) instead of being re-hit by every visitor.
+  Upstream calls time out after 60s (`CLOUDS_TIMEOUT_MIN`) instead of
+  hanging the single-flight harvest, a round where every wx network
+  fails sets a back-off floor (5 → 60 min) instead of being re-hit by
+  every visitor, and an EMPTY CoCoRaHS answer waits the 6h `COCO_TTL`
+  before the next try — it used to be re-asked every round, one request
+  in six spent on a feed that changes once a day.
 
 **Never inspect `/soil` through `WebFetch`.** It is ~70 KB and WebFetch
 silently truncates it, so what comes back is a well-formed-looking

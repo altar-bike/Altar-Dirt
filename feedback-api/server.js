@@ -297,7 +297,7 @@ const META_TTL = 7 * 24 * 3600 * 1000;
 /* A hung upstream call used to hang the single-flight harvest with it —
    every /soil after that waited on a promise that would never settle,
    until the next deploy. Give CLOUDS a generous minute and then move on. */
-const CLOUDS_TIMEOUT_MS = 60 * 1000;
+const CLOUDS_TIMEOUT_MS = Math.round(minutesOr(process.env.CLOUDS_TIMEOUT_MIN, 1));
 
 /* ==================== CLOUDS budget ====================
    Two caps bind on the public tier (api.climate.ncsu.edu/usage, read
@@ -949,12 +949,17 @@ async function cocoMeta() {
   return byId;
 }
 
-let cocoCache = { at: 0, rows: null };
+let cocoCache = { at: 0, rows: null, emptyAt: 0 };
 async function cocoSeries(dropped) {
   /* Morning-read tubes change once a day; serving the cached rows for
      COCO_TTL (default 6h) costs nothing in freshness and cuts this
      query from every refresh to ~4 a day. */
   if (cocoCache.rows && Date.now() - cocoCache.at < COCO_TTL) return cocoCache.rows;
+  /* An EMPTY answer parks the retry for the same TTL. Until 10 Sep 2026
+     it left the clock alone, so while CLOUDS's CoCoRaHS feed was blank
+     (4 Sep onward) every round re-asked and got nothing — one request
+     in six, spent on a feed that changes once a day at best. */
+  if (cocoCache.emptyAt && Date.now() - cocoCache.emptyAt < COCO_TTL) return cocoCache.rows || [];
   let j;
   try {
     j = await cloudsData({
@@ -1035,13 +1040,15 @@ async function cocoSeries(dropped) {
     }).join(" ");
     console.log("coco refetch: " + why.slice(5) + (peek ? "; sample " + peek.slice(0, 300) : "") +
       (cocoCache.rows ? "; serving " + cocoCache.rows.length + " cached rows from " +
-        new Date(cocoCache.at).toISOString().slice(0, 10) : ""));
+        new Date(cocoCache.at).toISOString().slice(0, 10) : "") + "; next try in " + Math.round(COCO_TTL / 60000) + " min");
+    cocoCache.emptyAt = Date.now();
+    saveStoreSoon();
   }
   /* Same rule as every other cache here: never bank an empty result
      over a populated one. An empty fetch keeps the old rows serving and
      leaves the cache clock alone so the next refresh retries upstream. */
   if (out.length) {
-    cocoCache = { at: Date.now(), rows: out };
+    cocoCache = { at: Date.now(), rows: out, emptyAt: 0 };
     console.log("coco refetch: " + out.length + " observers");
     saveStoreSoon();
     return out;
@@ -1500,7 +1507,9 @@ function saveStoreSoon() {
    CoCoRaHS when its cache has expired. Metadata lookups are rare (a
    week apart) and left out of the spacing; the ledger still counts them. */
 function roundRequests() {
-  const cocoDue = !(cocoCache.rows && Date.now() - cocoCache.at < COCO_TTL);
+  const now = Date.now();
+  const cocoDue = !(cocoCache.rows && now - cocoCache.at < COCO_TTL) &&
+                  !(cocoCache.emptyAt && now - cocoCache.emptyAt < COCO_TTL);
   return locVariants(CLOUDS_LOC).length + locVariants(CLOUDS_WX_LOC).length + (cocoDue ? 1 : 0);
 }
 
@@ -1561,7 +1570,8 @@ function statusReport() {
       gauges: Object.keys(wxStore.byId).length, newestHour: newestHour || null,
       lastReachedMin: wxAge, failStreak: wxStore.failStreak || 0
     },
-    coco: { observers: (cocoCache.rows || []).length, newestDate: cocoNewest, fetchedMin: cocoAge },
+    coco: { observers: (cocoCache.rows || []).length, newestDate: cocoNewest, fetchedMin: cocoAge,
+            lastEmptyMin: minsAgo(cocoCache.emptyAt) },
     budget: {
       month: ledger.month, requests: ledger.requests, requestBudget: reqBudgetNow(w),
       datapoints: ledger.datapoints, datapointBudget: dpBudgetNow(w), failedCalls: ledger.failures,

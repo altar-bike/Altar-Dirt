@@ -40,7 +40,10 @@ conditions page. Runs on Railway. `server.js` is the whole thing.
     the default in `server.js`; the boot log says which are set.
   - `SOIL_TTL_MIN`, `SOIL_FAIL_TTL_MIN`, `COCO_TTL_MIN`,
     `WX_MIN_INTERVAL_MIN` — cache lifetimes in minutes (defaults 60 /
-    5 / 360 / 20). The pacer floors all of them.
+    5 / 360 / 20). The pacer floors all of them. An empty CoCoRaHS
+    answer waits `COCO_TTL_MIN` before the next try, same as a full one.
+  - `CLOUDS_TIMEOUT_MIN` — how long to wait on one upstream call before
+    giving up (default 1 minute).
 
 ## Endpoints
 
