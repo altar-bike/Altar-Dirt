@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shop Floor – Altar</title>
+<link rel="icon" type="image/png" href="/static/altar-logo-dark.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --rust:#B85C2A; --black:#111111; --ash:#CCCCCC; --earth:#4A3728; --pisgah:#2C4A5A;
+    --surface:#1a1714; --line:#2e2620; --dim:#8a8178; --warn:#e0876a;
+    --display:'Big Shoulders Display', Impact, 'Arial Narrow', sans-serif;
+    --mono:'Space Mono', ui-monospace, Consolas, monospace;
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; background:var(--black); color:var(--ash); font-family:var(--mono); }
+  body { display:flex; flex-direction:column; min-height:100vh; }
+  button, input, select, textarea { font:inherit; color:inherit; }
+
+  /* ---- top bar ---- */
+  header { display:flex; align-items:center; gap:24px; padding:14px 24px; border-bottom:3px solid var(--rust); position:sticky; top:0; z-index:100; background:var(--black); }
+  .brand { display:flex; align-items:center; gap:16px; }
+  .brand img { height:64px; width:auto; display:block; }
+  .brand small { font-family:var(--display); font-size:1.05rem; font-weight:900; letter-spacing:.2em; color:var(--dim); border-left:1px solid var(--line); padding-left:16px; }
+  .service { display:flex; gap:28px; flex:1; justify-content:center; flex-wrap:wrap; }
+  .stat .n { font-family:var(--display); font-weight:900; font-size:2.2rem; line-height:1; }
+  .stat .l { font-size:.72rem; text-transform:uppercase; letter-spacing:.12em; color:var(--dim); }
+  .techs { font-size:.8rem; color:var(--dim); align-self:center; max-width:360px; }
+  .techs b { color:var(--ash); font-weight:700; }
+  .clock { text-align:right; }
+  .clock .t { font-family:var(--display); font-weight:900; font-size:2.6rem; line-height:1; }
+  .clock .d { font-size:.8rem; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; }
+
+  /* ---- main ---- */
+  main { flex:1 0 auto; display:grid; grid-template-columns:minmax(320px, 420px) 1fr; gap:24px; padding:24px; align-items:start; }
+  form.add h2 + label { margin-top:0; }
+  h2 { font-family:var(--display); font-weight:900; font-size:1.9rem; letter-spacing:.05em; margin:0 0 14px; text-transform:uppercase; }
+  h2 .count { color:var(--rust); }
+
+  form.add { background:var(--surface); border:1px solid var(--line); border-top:4px solid var(--rust); padding:20px; align-self:start; }
+  label { display:block; font-size:.72rem; text-transform:uppercase; letter-spacing:.12em; color:var(--dim); margin:14px 0 6px; }
+  input[type=text], input[type=number], textarea { width:100%; background:var(--black); border:1px solid var(--earth); padding:12px; font-size:1.1rem; }
+  textarea { min-height:64px; resize:vertical; font-size:.95rem; }
+  input:focus, textarea:focus, button:focus-visible { outline:2px solid var(--rust); outline-offset:1px; }
+  .row { display:grid; grid-template-columns:110px 1fr; gap:12px; }
+  .seg { display:flex; border:1px solid var(--earth); }
+  .seg button { flex:1; padding:12px 6px; background:var(--black); border:0; cursor:pointer; text-transform:uppercase; letter-spacing:.06em; font-size:.85rem; }
+  .seg button + button { border-left:1px solid var(--earth); }
+  .seg button[aria-pressed=true] { background:var(--earth); color:#fff; font-weight:700; }
+  .seg.urg button[aria-pressed=true][data-v=urgent] { background:var(--rust); color:var(--black); }
+  .seg.urg button[aria-pressed=true][data-v=immediate] { background:var(--warn); color:var(--black); font-weight:700; }
+  .hint { font-size:.75rem; color:var(--warn); margin-top:6px; }
+  li.need.immediate { border-left-color:var(--warn); background:#2a1a14; }
+  .tag.now { border-color:var(--warn); background:var(--warn); color:var(--black); font-weight:700; }
+  .submit { margin-top:18px; width:100%; padding:16px; background:var(--rust); color:var(--black); border:0; font-weight:700; font-size:1.05rem; text-transform:uppercase; letter-spacing:.14em; cursor:pointer; }
+  .submit:disabled { opacity:.5; cursor:wait; }
+  .msg { min-height:1.3em; margin-top:10px; font-size:.85rem; }
+  .msg.err { color:var(--warn); } .msg.ok { color:var(--ash); }
+
+  .board { min-width:0; }
+  .filters { display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+  .filters button { padding:8px 14px; background:transparent; border:1px solid var(--earth); cursor:pointer; text-transform:uppercase; font-size:.78rem; letter-spacing:.08em; }
+  .filters button[aria-pressed=true] { background:var(--earth); color:#fff; }
+  .group { margin-bottom:26px; }
+  .group h3 { font-family:var(--display); font-weight:700; font-size:1.25rem; letter-spacing:.12em; text-transform:uppercase; color:var(--dim); margin:0 0 8px; border-bottom:1px solid var(--line); padding-bottom:4px; }
+  ul { list-style:none; margin:0; padding:0; }
+  li.need { display:grid; grid-template-columns:70px 1fr auto; gap:14px; align-items:center; padding:12px 14px; background:var(--surface); border-left:4px solid var(--earth); margin-bottom:6px; }
+  li.need.urgent { border-left-color:var(--rust); }
+  li.need.received { opacity:.55; }
+  .qty { font-family:var(--display); font-weight:900; font-size:2rem; text-align:center; line-height:1; }
+  .qty small { display:block; font-family:var(--mono); font-size:.62rem; font-weight:400; color:var(--dim); letter-spacing:.08em; }
+  .what { font-size:1.1rem; font-weight:700; word-break:break-word; }
+  .tags { margin-top:4px; font-size:.75rem; color:var(--dim); }
+  .tag { display:inline-block; padding:1px 6px; margin-right:6px; border:1px solid var(--pisgah); color:#9fb6c2; text-transform:uppercase; letter-spacing:.06em; }
+  .tag.urg { border-color:var(--rust); color:var(--rust); }
+  .tag.coffee { border-color:#7a5a3c; color:#c9a27e; }
+  .acts a.amz { display:inline-flex; align-items:center; padding:10px 12px; border:1px solid #7a5a3c; color:#c9a27e; text-decoration:none; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; white-space:nowrap; }
+  .amz-bar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; background:var(--surface); border:1px solid var(--line); padding:12px 14px; margin-bottom:14px; font-size:.85rem; }
+  .amz-bar a { padding:10px 14px; background:var(--rust); color:var(--black); font-weight:700; text-decoration:none; text-transform:uppercase; letter-spacing:.08em; font-size:.8rem; }
+  .amz-bar .dim { color:var(--dim); }
+  .notes { margin-top:4px; font-size:.85rem; color:var(--ash); opacity:.85; white-space:pre-wrap; word-break:break-word; }
+  .acts { display:flex; gap:6px; }
+  .acts button { padding:10px 12px; background:transparent; border:1px solid var(--earth); cursor:pointer; font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; white-space:nowrap; }
+  .acts button.primary { border-color:var(--rust); color:var(--rust); }
+  .acts button.confirm { background:var(--warn); color:var(--black); border-color:var(--warn); }
+  .empty { color:var(--dim); padding:12px 0; font-size:.9rem; }
+
+  .left { align-self:start; }
+  .modes { display:flex; margin-bottom:0; }
+  .modes button { flex:1; padding:14px 8px; background:transparent; border:1px solid var(--line); border-bottom:0; cursor:pointer; font-family:var(--display); font-weight:900; font-size:1.15rem; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); }
+  .modes button[aria-pressed=true] { background:var(--surface); color:var(--ash); border-top:4px solid var(--rust); }
+  .left form.add { border-top:0; }
+  .scan { font-size:1.4rem !important; letter-spacing:.08em; }
+  .found { margin-top:14px; padding:14px; border:1px solid var(--earth); background:var(--black); }
+  .found .what { font-size:1.15rem; }
+  .found .sku { font-size:.75rem; color:var(--dim); margin-top:4px; }
+  .qtyrow { display:flex; gap:8px; align-items:center; }
+  .qtyrow button { width:52px; height:52px; font-size:1.6rem; background:var(--black); border:1px solid var(--earth); cursor:pointer; }
+  .qtyrow input { text-align:center; font-size:1.4rem !important; width:90px !important; }
+  .tag.pending { border-color:var(--amber, #d9a441); color:#d9a441; }
+  .tag.applied { border-color:#3f6b4f; color:#8fbf9f; }
+  .tag.failed, .tag.rejected { border-color:var(--warn); color:var(--warn); }
+  footer { display:flex; justify-content:space-between; padding:8px 24px; font-size:.72rem; color:var(--dim); border-top:1px solid var(--line); }
+  footer a { color:var(--dim); }
+  .offline { color:var(--warn); font-weight:700; }
+
+  @media (max-width: 900px) {
+    header { flex-wrap:wrap; }
+    .brand img { height:46px; }
+    .service { order:3; width:100%; justify-content:flex-start; }
+    main { grid-template-columns:1fr; padding:16px; }
+    li.need { grid-template-columns:54px 1fr; }
+    .acts { grid-column:1 / -1; justify-content:flex-end; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><img src="/static/altar-logo-dark.png" alt="Altar Cycles"><small>SHOP FLOOR</small></div>
+  <div class="service" id="service" aria-live="polite">
+    <div class="stat"><div class="n" id="s-open">–</div><div class="l">Open work orders</div></div>
+    <div class="stat"><div class="n" id="s-in">–</div><div class="l">Checked in · 7 days</div></div>
+    <div class="stat"><div class="n" id="s-out">–</div><div class="l">Finished · 7 days</div></div>
+    <div class="techs" id="s-techs"></div>
+  </div>
+  <div class="clock"><div class="t" id="clock-t">--:--</div><div class="d" id="clock-d"></div></div>
+</header>
+
+<main>
+  <div class="left">
+  <div class="modes" id="modes">
+    <button type="button" data-m="needs" aria-pressed="true">We need…</button>
+    <button type="button" data-m="use" aria-pressed="false">Shop use</button>
+  </div>
+  <form class="add" id="add-form" autocomplete="off">
+    <h2>We need…</h2>
+
+    <label for="f-item">Item</label>
+    <input type="text" id="f-item" maxlength="120" placeholder="e.g. Shimano 11-spd chain" required>
+
+    <label>Type</label>
+    <div class="seg" id="f-cat">
+      <button type="button" data-v="inventory" aria-pressed="true">Bike inventory</button>
+      <button type="button" data-v="supplies" aria-pressed="false">Shop supplies</button>
+      <button type="button" data-v="coffee" aria-pressed="false">Coffee bar</button>
+    </div>
+
+    <label for="f-qty">Qty</label>
+    <input type="number" id="f-qty" min="1" max="9999" value="1" required style="max-width:120px">
+
+    <label>How soon</label>
+    <div class="seg urg" id="f-urg">
+      <button type="button" data-v="normal" aria-pressed="true">Next order</button>
+      <button type="button" data-v="urgent" aria-pressed="false">Urgent</button>
+      <button type="button" data-v="immediate" aria-pressed="false">Need now</button>
+    </div>
+    <div id="urg-hint" class="hint" hidden>Pings the crew in Google Chat as soon as you add it.</div>
+
+    <div id="amz-wrap" hidden>
+      <label for="f-amz">Amazon link <span style="text-transform:none;letter-spacing:0">(optional, paste from amazon.com)</span></label>
+      <input type="text" id="f-amz" maxlength="600" placeholder="https://www.amazon.com/dp/…" inputmode="url">
+    </div>
+
+    <label for="f-notes">Notes <span style="text-transform:none;letter-spacing:0">(size, color, SKU, customer waiting…)</span></label>
+    <textarea id="f-notes" maxlength="500"></textarea>
+
+    <label for="f-name">Your name</label>
+    <input type="text" id="f-name" maxlength="40" list="names" required>
+    <datalist id="names"></datalist>
+
+    <button class="submit" id="f-submit" type="submit">Add to list</button>
+    <div class="msg" id="f-msg" role="status"></div>
+  </form>
+
+  <form class="add" id="use-form" autocomplete="off" hidden>
+    <h2>Took it for the shop</h2>
+    <label for="u-code">Scan the barcode</label>
+    <input type="text" id="u-code" class="scan" maxlength="40" placeholder="Scan or type UPC / SKU" enterkeyhint="search">
+    <div class="found" id="u-found" hidden>
+      <div class="what" id="u-desc"></div>
+      <div class="sku" id="u-sku"></div>
+      <label for="u-qty">How many</label>
+      <div class="qtyrow">
+        <button type="button" id="u-minus" aria-label="One less">−</button>
+        <input type="number" id="u-qty" min="1" max="99" value="1">
+        <button type="button" id="u-plus" aria-label="One more">+</button>
+      </div>
+      <label for="u-note">What for <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
+      <input type="text" id="u-note" maxlength="200" placeholder="e.g. demo fleet, shop bike, warranty swap">
+      <label for="u-name">Your name</label>
+      <input type="text" id="u-name" maxlength="40" list="names">
+      <button class="submit" id="u-submit" type="submit">Take it</button>
+    </div>
+    <div class="msg" id="u-msg" role="status"></div>
+    <p style="font-size:.78rem;color:var(--dim);margin:14px 0 0;line-height:1.5">A manager approves shop-use scans before stock changes in Lightspeed. Wrong scan? Tap ✕ on it while it says Waiting.</p>
+  </form>
+  </div>
+
+  <section class="board" id="needs-board">
+    <h2>Needs list <span class="count" id="open-count"></span></h2>
+    <div class="filters" id="filters">
+      <button type="button" data-f="all" aria-pressed="true">All</button>
+      <button type="button" data-f="inventory" aria-pressed="false">Bike</button>
+      <button type="button" data-f="supplies" aria-pressed="false">Shop supplies</button>
+      <button type="button" data-f="coffee" aria-pressed="false">Coffee bar</button>
+      <button type="button" data-f="amazon" aria-pressed="false">Amazon</button>
+    </div>
+    <div id="groups"></div>
+  </section>
+
+  <section class="board" id="use-board" hidden>
+    <h2>Shop use <span class="count" id="use-count"></span></h2>
+    <ul id="use-list"></ul>
+  </section>
+</main>
+
+<footer>
+  <span id="sync">Loading…</span>
+  <span>Service numbers as of <span id="s-asof">–</span> · <a href="/login?next=/">Manager</a></span>
+</footer>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  };
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  // ---- clock ----
+  function tick() {
+    const now = new Date();
+    $('clock-t').textContent = now.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' });
+    $('clock-d').textContent = now.toLocaleDateString([], { weekday:'short', month:'short', day:'numeric' });
+  }
+  tick(); setInterval(tick, 10_000);
+
+  // ---- segmented buttons ----
+  function seg(id) {
+    const el = $(id);
+    el.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      el.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    });
+    return {
+      get: () => el.querySelector('[aria-pressed=true]').dataset.v,
+      reset: () => el.querySelectorAll('button').forEach((x, i) => x.setAttribute('aria-pressed', i === 0)),
+    };
+  }
+  const cat = seg('f-cat'), urg = seg('f-urg');
+  $('f-urg').addEventListener('click', () => setTimeout(() => { $('urg-hint').hidden = urg.get() !== 'immediate'; }));
+  const CAT_LABEL = { inventory: 'Bike inventory', supplies: 'Shop supplies', coffee: 'Coffee bar' };
+  const NON_BIKE = ['supplies', 'coffee'];
+  function syncAmz() { $('amz-wrap').hidden = !NON_BIKE.includes(cat.get()); }
+  $('f-cat').addEventListener('click', () => setTimeout(syncAmz));
+  syncAmz();
+
+  // ---- names (remembered per PC) ----
+  let names = store.get('altar.names', []);
+  function renderNames() { $('names').innerHTML = names.map(n => `<option value="${esc(n)}">`).join(''); }
+  renderNames();
+  $('f-name').value = store.get('altar.lastName', '');
+  function rememberName(n) {
+    names = [n, ...names.filter(x => x.toLowerCase() !== n.toLowerCase())].slice(0, 20);
+    store.set('altar.names', names); store.set('altar.lastName', n); renderNames();
+  }
+
+  // ---- API ----
+  async function api(method, url, body) {
+    const r = await fetch(url, {
+      method, headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    let data = {}; try { data = await r.json(); } catch {}
+    if (!r.ok) throw new Error(data.error || `Server said ${r.status}`);
+    return data;
+  }
+
+  // ---- needs list ----
+  let needs = [], filter = 'all', lastSync = null, offline = false;
+  const armed = new Set();   // ids waiting for a second tap on Remove
+
+  $('filters').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    filter = b.dataset.f;
+    $('filters').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    render();
+  });
+
+  function ago(iso) {
+    const s = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (s < 90) return 'just now';
+    if (s < 3600) return `${Math.round(s/60)} min ago`;
+    if (s < 86400) return `${Math.round(s/3600)} hr ago`;
+    return new Date(iso).toLocaleDateString([], { month:'short', day:'numeric' });
+  }
+
+  function item(n) {
+    const actions = {
+      open: `<button class="primary" data-a="ordered">Ordered</button><button data-a="received">Got it</button>`,
+      ordered: `<button class="primary" data-a="received">Got it</button><button data-a="open">Undo</button>`,
+      received: `<button data-a="ordered">Undo</button>`,
+    }[n.status];
+    const amz = n.amazon_url ? `<a class="amz" href="${esc(n.amazon_url)}" target="_blank" rel="noopener noreferrer">Amazon ↗</a>` : '';
+    const rm = armed.has(n.id) ? `<button class="confirm" data-a="delete">Sure?</button>` : `<button data-a="arm" aria-label="Remove">✕</button>`;
+    const who = n.status === 'open'
+      ? `${esc(n.requested_by)} · ${ago(n.created_at)}`
+      : `${n.status} ${ago(n.updated_at)}${n.updated_by ? ' by ' + esc(n.updated_by) : ''} · asked by ${esc(n.requested_by)}`;
+    const live = n.status !== 'received';
+    const urgCls = live && n.urgency === 'immediate' ? 'immediate' : live && n.urgency === 'urgent' ? 'urgent' : '';
+    return `<li class="need ${urgCls} ${n.status}" data-id="${n.id}">
+      <div class="qty">${n.qty}<small>QTY</small></div>
+      <div>
+        <div class="what">${esc(n.item)}</div>
+        <div class="tags">
+          ${urgCls === 'immediate' ? '<span class="tag now">Need now</span>' : urgCls === 'urgent' ? '<span class="tag urg">Urgent</span>' : ''}
+          <span class="tag ${n.category === 'coffee' ? 'coffee' : ''}">${CAT_LABEL[n.category] || n.category}</span>${who}
+        </div>
+        ${n.notes ? `<div class="notes">${esc(n.notes)}</div>` : ''}
+      </div>
+      <div class="acts">${amz}${actions}${rm}</div>
+    </li>`;
+  }
+
+  function amazonBar() {
+    const open = needs.filter(n => n.status === 'open' && NON_BIKE.includes(n.category));
+    const withAsin = open.filter(n => n.asin);
+    let cart = '';
+    if (withAsin.length) {
+      const q = withAsin.slice(0, 50).map((n, i) => `ASIN.${i+1}=${encodeURIComponent(n.asin)}&Quantity.${i+1}=${n.qty}`).join('&');
+      cart = `<a href="https://www.amazon.com/gp/aws/cart/add.html?${q}" target="_blank" rel="noopener noreferrer">Add ${withAsin.length} to Amazon cart (beta)</a>`;
+    }
+    const noLink = open.length - open.filter(n => n.amazon_url).length;
+    return `<div class="amz-bar"><span><b>${open.length}</b> non-bike item${open.length === 1 ? '' : 's'} to order</span>${cart}${
+      noLink ? `<span class="dim">${noLink} without a link: search Amazon for those.</span>` : ''}</div>`;
+  }
+
+  function render() {
+    const shown = needs.filter(n =>
+      filter === 'all' ? true :
+      filter === 'amazon' ? NON_BIKE.includes(n.category) :
+      n.category === filter);
+    const groups = [
+      ['open', 'Needed'], ['ordered', 'On order'], ['received', 'Received · last 7 days'],
+    ];
+    $('open-count').textContent = `· ${needs.filter(n => n.status === 'open').length} open`;
+    $('groups').innerHTML = (filter === 'amazon' ? amazonBar() : '') + groups.map(([s, label]) => {
+      const list = shown.filter(n => n.status === s);
+      if (s === 'received' && !list.length) return '';
+      return `<div class="group"><h3>${label} (${list.length})</h3>${
+        list.length ? `<ul>${list.map(item).join('')}</ul>` : '<div class="empty">Nothing here.</div>'
+      }</div>`;
+    }).join('');
+  }
+
+  function renderSync() {
+    $('sync').innerHTML = offline
+      ? `<span class="offline">Can't reach the server — showing the last list we had.</span>`
+      : `List updated ${lastSync ? lastSync.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}) : '–'}`;
+  }
+
+  async function loadNeeds() {
+    try {
+      needs = (await api('GET', '/api/needs')).needs;
+      offline = false; lastSync = new Date();
+      render();
+    } catch { offline = true; }
+    renderSync();
+  }
+
+  $('groups').addEventListener('click', async e => {
+    const b = e.target.closest('button[data-a]'); if (!b) return;
+    const id = Number(b.closest('li').dataset.id), a = b.dataset.a;
+    if (a === 'arm') {
+      armed.add(id); render();
+      setTimeout(() => { armed.delete(id); render(); }, 4000);
+      return;
+    }
+    b.disabled = true;
+    try {
+      if (a === 'delete') { armed.delete(id); await api('DELETE', `/api/needs/${id}`); }
+      else await api('PATCH', `/api/needs/${id}`, { status: a, by: $('f-name').value.trim() });
+    } catch (err) { flash(err.message, true); }
+    loadNeeds();
+  });
+
+  // ---- add form ----
+  function flash(text, isErr) {
+    const m = $('f-msg'); m.textContent = text; m.className = 'msg ' + (isErr ? 'err' : 'ok');
+    clearTimeout(flash.t); flash.t = setTimeout(() => { m.textContent = ''; }, 5000);
+  }
+
+  $('add-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = $('f-name').value.trim();
+    const body = {
+      item: $('f-item').value.trim(), qty: Number($('f-qty').value || 1),
+      category: cat.get(), urgency: urg.get(),
+      notes: $('f-notes').value.trim(), requested_by: name,
+      amazon_url: NON_BIKE.includes(cat.get()) ? $('f-amz').value.trim() : '',
+    };
+    $('f-submit').disabled = true;
+    try {
+      const res = await api('POST', '/api/needs', body);
+      rememberName(name);
+      $('f-item').value = ''; $('f-qty').value = 1; $('f-notes').value = ''; $('f-amz').value = ''; urg.reset();
+      flash(`Added: ${body.qty} × ${body.item}` + (res.chat ? ' · crew pinged in Google Chat' : ''));
+      $('urg-hint').hidden = true;
+      $('f-item').focus();
+      loadNeeds();
+    } catch (err) { flash(err.message, true); }
+    $('f-submit').disabled = false;
+  });
+
+  // ---- service strip (no dollar figures) ----
+  async function loadService() {
+    try {
+      const s = await api('GET', '/api/shop');
+      if (!s.generated_at) { $('s-asof').textContent = 'waiting for first refresh'; return; }
+      const sum = k => s.last7.reduce((t, d) => t + (d[k] || 0), 0);
+      $('s-open').textContent = s.open_total;
+      $('s-in').textContent = sum('opened');
+      $('s-out').textContent = sum('completed');
+      $('s-techs').innerHTML = s.open_by_tech.slice(0, 5).map(t => `<b>${esc(t.tech)}</b> ${t.open}`).join(' · ');
+      $('s-asof').textContent = s.generated_at;
+    } catch { /* keep last numbers */ }
+  }
+
+  // ---- mode switch ----
+  let mode = 'needs';
+  $('modes').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    mode = b.dataset.m;
+    $('modes').querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    $('add-form').hidden = mode !== 'needs';  $('needs-board').hidden = mode !== 'needs';
+    $('use-form').hidden = mode !== 'use';    $('use-board').hidden = mode !== 'use';
+    if (mode === 'use') { loadUse(); $('u-code').focus(); } else { $('f-item').focus(); }
+  });
+
+  // ---- shop use ----
+  let found = null, useEntries = [];
+  const STATUS_LABEL = { pending: 'Waiting', applied: 'Taken out', rejected: 'Rejected', failed: 'Failed' };
+  function umsg(text, isErr) {
+    const m = $('u-msg'); m.textContent = text; m.className = 'msg ' + (isErr ? 'err' : 'ok');
+    clearTimeout(umsg.t); umsg.t = setTimeout(() => { m.textContent = ''; }, 6000);
+  }
+  function resetUse() {
+    found = null; $('u-found').hidden = true; $('u-code').value = ''; $('u-qty').value = 1; $('u-note').value = '';
+    $('u-code').focus();
+  }
+  $('u-name').value = store.get('altar.lastName', '');
+  $('u-minus').addEventListener('click', () => { $('u-qty').value = Math.max(1, Number($('u-qty').value || 1) - 1); });
+  $('u-plus').addEventListener('click', () => { $('u-qty').value = Math.min(99, Number($('u-qty').value || 1) + 1); });
+
+  $('u-code').addEventListener('keydown', async e => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const code = $('u-code').value.trim(); if (!code) return;
+    // Scanning the same item again while it's showing just bumps the count.
+    if (found && found.code === code) { $('u-plus').click(); $('u-code').value = ''; return; }
+    umsg('Looking it up…');
+    try {
+      const r = await api('GET', '/api/shop-use/lookup?code=' + encodeURIComponent(code));
+      found = { code: r.code, ...r.item };
+      $('u-desc').textContent = r.item.description;
+      $('u-sku').textContent = 'System SKU ' + (r.item.system_sku || '–') + ' · scanned ' + r.code;
+      $('u-found').hidden = false; $('u-qty').value = 1; $('u-code').value = '';
+      umsg('');
+      ($('u-name').value ? $('u-submit') : $('u-name')).focus();
+    } catch (err) { found = null; $('u-found').hidden = true; umsg(err.message, true); $('u-code').select(); }
+  });
+
+  $('use-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!found) { $('u-code').focus(); return; }
+    const name = $('u-name').value.trim();
+    $('u-submit').disabled = true;
+    try {
+      await api('POST', '/api/shop-use', { code: found.code, qty: Number($('u-qty').value || 1), used_by: name, note: $('u-note').value.trim() });
+      rememberName(name);
+      umsg(`Logged: ${$('u-qty').value} × ${found.description}`);
+      resetUse(); loadUse();
+    } catch (err) { umsg(err.message, true); }
+    $('u-submit').disabled = false;
+  });
+
+  function useItem(u) {
+    const when = u.status === 'pending' ? ago(u.created_at) : `${STATUS_LABEL[u.status].toLowerCase()} ${ago(u.applied_at || u.created_at)}`;
+    return `<li class="need ${u.status === 'applied' ? 'received' : ''}" data-id="${u.id}">
+      <div class="qty">${u.qty}<small>QTY</small></div>
+      <div>
+        <div class="what">${esc(u.description)}</div>
+        <div class="tags"><span class="tag ${u.status}">${STATUS_LABEL[u.status] || u.status}</span>${esc(u.used_by)} · ${when}</div>
+        ${u.note ? `<div class="notes">${esc(u.note)}</div>` : ''}
+      </div>
+      <div class="acts">${u.status === 'pending' ? '<button data-a="cancel" aria-label="Remove">✕</button>' : ''}</div>
+    </li>`;
+  }
+  function renderUse() {
+    $('use-count').textContent = `· ${useEntries.filter(u => u.status === 'pending').length} waiting`;
+    $('use-list').innerHTML = useEntries.length ? useEntries.map(useItem).join('') : '<div class="empty">Nothing scanned in the last two days.</div>';
+  }
+  async function loadUse() {
+    try { useEntries = (await api('GET', '/api/shop-use')).entries; renderUse(); } catch {}
+  }
+  $('use-list').addEventListener('click', async e => {
+    const b = e.target.closest('button[data-a=cancel]'); if (!b) return;
+    b.disabled = true;
+    try { await api('DELETE', '/api/shop-use/' + b.closest('li').dataset.id); } catch (err) { umsg(err.message, true); }
+    loadUse(); $('u-code').focus();
+  });
+  setInterval(() => { if (mode === 'use') loadUse(); }, 30_000);
+
+  loadNeeds(); loadService();
+  setInterval(loadNeeds, 30_000);
+  setInterval(loadService, 5 * 60_000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) loadNeeds(); });
+  // Reload a few times a day so the PCs pick up new deploys without anyone touching them.
+  // Waits if someone is mid-entry.
+  function maybeReload() {
+    if ($('f-item').value || $('f-notes').value || found) return setTimeout(maybeReload, 5 * 60_000);
+    location.reload();
+  }
+  setTimeout(maybeReload, 6 * 3600_000);
+})();
+</script>
+</body>
+</html>
