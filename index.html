@@ -70,6 +70,11 @@ window.ALTAR_SETTINGS = {
   box-sizing:border-box;
 }
 #dirt-app *{box-sizing:border-box;}
+/* The browser's own [hidden]{display:none} loses to any rule below that
+   sets display on an #dirt-app selector — which is how the four "Worth
+   the drive" shells came to sit on the page reading "Reading
+   conditions…" before anyone had pressed the button. */
+#dirt-app [hidden]{display:none!important;}
 #dirt-app a{color:var(--rust);text-decoration:none;border-bottom:1px solid rgba(184,92,42,.4);}
 #dirt-app a:hover{border-bottom-color:var(--rust);}
 #dirt-app button:focus-visible{outline:2px solid var(--rust);outline-offset:3px;}
@@ -133,6 +138,16 @@ window.ALTAR_SETTINGS = {
 #dirt-app .da-blurb{margin:8px 0 0;font-size:14px;line-height:1.55;color:var(--ash);}
 #dirt-app .da-window{font-family:'Space Mono',monospace;font-size:11.5px;color:var(--muted);margin:0 0 12px;}
 #dirt-app .da-window b{font-weight:700;}
+/* Where the rain number came from — a gauge near the trail, a gauge a
+   few miles off, or the forecast alone. Words carry it; the dot is a
+   second cue, never the only one. */
+#dirt-app .da-src{
+  display:flex;align-items:center;gap:7px;
+  font-family:'Space Mono',monospace;font-size:11px;line-height:1.4;color:var(--ash);margin:-4px 0 12px;
+}
+#dirt-app .da-src i{flex:none;width:8px;height:8px;border-radius:50%;border:1px solid var(--muted);}
+#dirt-app .da-src i.m{background:#7A8A3E;border-color:#7A8A3E;}
+#dirt-app .da-src i.a{background:var(--rust);border-color:var(--rust);}
 
 /* ---------- the soil dials ----------
    Three per card — the same weather scored through rock, clay and loam.
@@ -626,8 +641,13 @@ window.ALTAR_SETTINGS = {
     hero:   { label: "Hero dirt",    color: "#7A8A3E", blurb: "Tacky, grippy, no dust. Go now." },
     good:   { label: "Good",         color: "#6B7A38", blurb: "Solid traction. Trail can take the traffic." },
     soft:   { label: "Soft",         color: "#B85C2A", blurb: "Rideable. Expect rut and braking bump." },
-    wet:    { label: "Wet",          color: "#2C4A5A", blurb: "Trail will take damage. Stay off the brakes." },
-    slop:   { label: "Slop",         color: "#7E2E18", blurb: "Riding this tears it up. Pick somewhere else." },
+    /* `solid` (10 Nov 2026): Pisgah Shadow and the deep rust are 1.8:1
+       against the card — fine as a fill, unreadable as text, and these
+       are the two states where the page is telling someone to stay off.
+       So the label is drawn as a filled block with Ash text on it
+       (5.9:1 and 5.7:1) and the numbers use `ink`. No new colours. */
+    wet:    { label: "Wet",          color: "#2C4A5A", ink: "#CCCCCC", solid: true, blurb: "Trail will take damage. Stay off the brakes." },
+    slop:   { label: "Slop",         color: "#7E2E18", ink: "#CCCCCC", solid: true, blurb: "Riding this tears it up. Pick somewhere else." },
     dusty:  { label: "Blown out",    color: "#A9998A", blurb: "Loose over hard. Corners will let go." },
     /* Added 7 Aug 2026 for the severe end of the dry side, now reachable
        since the dusty penalty is soil-scaled and uncapped-in-practice
@@ -675,6 +695,15 @@ window.ALTAR_SETTINGS = {
 
   var r0 = function (n) { return Math.round(n); };
   var clamp = function (n, a, b) { return Math.max(a, Math.min(b, n)); };
+
+  /* Text colour for a state, and the inline style for its label. Use
+     these rather than STATES[k].color wherever the colour lands on TEXT. */
+  function inkOf(s) { return s.ink || s.color; }
+  function pillStyle(s) {
+    return s.solid
+      ? "color:" + s.ink + ";background:" + s.color + ";border-color:" + s.color
+      : "color:" + s.color + ";border-color:" + s.color;
+  }
 
   function hourLabel(h) {
     var ap = h < 12 ? "a" : "p";
@@ -1004,20 +1033,61 @@ window.ALTAR_SETTINGS = {
       today.push(ev);
     }
 
-    var pool = today.filter(function (x) { return x.idx >= nowIdx && x.daylight; });
-    var best = null, lens = [4, 3, 2];
-    for (var li = 0; li < lens.length; li++) {
-      var len = lens[li];
-      for (var s = 0; s + len <= pool.length; s++) {
-        var slice = pool.slice(s, s + len), contiguous = true;
-        for (var c = 1; c < slice.length; c++) if (slice[c].hour !== slice[c - 1].hour + 1) contiguous = false;
-        if (!contiguous) continue;
-        var mean = slice.reduce(function (a, b) { return a + b.score; }, 0) / len;
-        if (!best || mean > best.mean + 1.5) best = { mean: mean, from: slice[0].hour, to: slice[len - 1].hour };
+    /* Best stretch of 4, then 3, then 2 daylight hours in a row. A
+       function since 10 Nov 2026 so tomorrow can be asked the same
+       question after dark; the search itself is unchanged. `key` is the
+       state of the window's weakest hour. */
+    function findWindow(pool) {
+      var best = null, lens = [4, 3, 2];
+      for (var li = 0; li < lens.length; li++) {
+        var len = lens[li];
+        for (var s = 0; s + len <= pool.length; s++) {
+          var slice = pool.slice(s, s + len), contiguous = true;
+          for (var c = 1; c < slice.length; c++) if (slice[c].hour !== slice[c - 1].hour + 1) contiguous = false;
+          if (!contiguous) continue;
+          var mean = slice.reduce(function (a, b) { return a + b.score; }, 0) / len;
+          if (!best || mean > best.mean + 1.5) {
+            var low = slice.reduce(function (a, b) { return b.score < a.score ? b : a; });
+            best = { mean: mean, from: slice[0].hour, to: slice[len - 1].hour, key: low.key };
+          }
+        }
+        if (best) break;
       }
-      if (best) break;
+      if (best && best.mean < 42) best = null;
+      return best;
     }
-    if (best && best.mean < 42) best = null;
+
+    var pool = today.filter(function (x) { return x.idx >= nowIdx && x.daylight; });
+    var best = findWindow(pool);
+
+    /* After dark there is no daylight hour left to offer, and the card
+       used to say "Go now" over "No good window left today" at half
+       eight at night. `dark` says so, and `next` is tomorrow's best
+       window, found the same way. Neither touches a score. */
+    var dark = pool.length === 0, next = null;
+    if (dark) {
+      var nxDate = data.daily.time[dayIdx + 1], nxStart = -1;
+      if (nxDate) {
+        for (i = 0; i < times.length; i++) if (times[i].indexOf(nxDate) === 0) { nxStart = i; break; }
+      }
+      if (nxStart >= 0) {
+        /* Tomorrow's own daylight, whole lit hours only: a 6:58 sunrise
+           must not offer "6a", nor a 5:25 sunset a window ending 6p. */
+        var nxSr = data.daily.sunrise[dayIdx + 1] || "", nxSs = data.daily.sunset[dayIdx + 1] || "";
+        var nxRise = parseInt(nxSr.slice(11, 13), 10) + (parseInt(nxSr.slice(14, 16), 10) > 0 ? 1 : 0);
+        var nxSet = parseInt(nxSs.slice(11, 13), 10) - 1;
+        if (isNaN(nxRise)) nxRise = sunrise;
+        if (isNaN(nxSet)) nxSet = sunset;
+        var nxPool = [];
+        for (var nq = nxRise; nq <= nxSet; nq++) {
+          if (nxStart + nq >= times.length) break;
+          var nxe = evaluate(nxStart + nq);
+          nxe.hour = nq;
+          nxPool.push(nxe);
+        }
+        next = findWindow(nxPool);
+      }
+    }
 
     /* When does it come back? Only worth answering when the model has
        it out of the good band now. Three hours in a row, so one
@@ -1063,6 +1133,7 @@ window.ALTAR_SETTINGS = {
 
     return {
       now: nowEval, today: today, best: best, outlook: outlook,
+      dark: dark, next: next,
       recovery: recovery, waterNow: water[nowIdx], rainSource: rainSource, rainWatch: rainWatch,
       soaking: soaking,
       hasSoil: hasSoil, nowIdx: nowIdx,
@@ -1738,7 +1809,7 @@ window.ALTAR_SETTINGS = {
 
   function gaugeHtml(label, ma) {
     var score = clamp(ma.now.score, 0, 100);
-    var col = STATES[ma.now.key].color;
+    var col = inkOf(STATES[ma.now.key]);
     var ahead = bestAhead(ma), ghost = "";
     if (ahead) {
       var gs = clamp(ahead.score, 0, 100);
@@ -1775,6 +1846,7 @@ window.ALTAR_SETTINGS = {
     var gap = vals[0].s - vals[2].s;
     var head = gap >= 15
       ? vals[0].n + " +" + gap + " over " + vals[2].n.toLowerCase() + " — pick by dirt"
+      : gap < 1 ? "every dirt the same — ride anything"
       : "every dirt within " + gap + " — ride anything";
     var ahead = bestAhead(m);
     if (!ahead) return head;
@@ -1784,9 +1856,45 @@ window.ALTAR_SETTINGS = {
     return head + " · " + trend;
   }
 
+  /* One line on the card face saying where the rain number came from.
+     Until 10 Nov 2026 this lived only inside "Why this number", so a
+     card scored from a gauge in the forest and a card scored from a
+     forecast that may have missed the storm looked identical. The test
+     for "measured" matches measuredHtml's (six gauge hours or more).
+     Cards paint before /soil lands, so there is a third state — still
+     asking — and refreshSrc() settles it if the gauges never arrive. */
+  var WX_SETTLED = false;
+  function srcHtml(m) {
+    var rs = m.rainSource, cls = "f", txt;
+    if (rs && rs.hours >= 6) {
+      cls = rs.tier === 2 ? "a" : "m";
+      txt = rs.tier === 2
+        ? "Rain: area gauge, " + rs.mi.toFixed(1) + " mi off"
+        : "Rain: measured " + rs.mi.toFixed(1) + " mi away";
+    } else if (!EXTRA.wx) {
+      txt = WX_SETTLED ? "Rain: forecast only — gauges are offline"
+                       : "Rain: checking the gauges…";
+    } else if (rs) {
+      txt = "Rain: forecast only — nearest gauge is quiet";
+    } else if (m.rainWatch) {
+      txt = "Rain: forecast only — a gauge " + m.rainWatch.mi.toFixed(0) + " mi off caught more";
+    } else {
+      txt = "Rain: forecast only — no gauge close by";
+    }
+    return '<i class="' + cls + '"></i><span>' + esc(txt) + "</span>";
+  }
+  function refreshSrc() {
+    TRAILS.forEach(function (t, i) {
+      var el = cards[i] && cards[i].querySelector(".da-src");
+      if (el && models[i]) el.innerHTML = srcHtml(models[i]);
+    });
+  }
+
   function renderCard(el, t, m) {
     var body = el.querySelector(".da-body");
     var s = STATES[m.now.key];
+    /* "Go now" is the wrong thing to say in the dark. */
+    var blurb = m.dark ? s.blurb.replace(/ Go now\.$/, "") : s.blurb;
 
     var sm3 = soilModels(t, m);
     var trio = "";
@@ -1815,10 +1923,10 @@ window.ALTAR_SETTINGS = {
     body.innerHTML =
       '<div class="da-alertbox">' + alertHtml(t) + "</div>" +
       '<div class="da-readout">' +
-        '<div class="da-score" style="color:' + s.color + '">' + r0(m.now.score) + "</div>" +
+        '<div class="da-score" style="color:' + inkOf(s) + '">' + r0(m.now.score) + "</div>" +
         "<div>" +
-          '<span class="da-state" style="color:' + s.color + ";border-color:" + s.color + '">' + esc(s.label) + "</span>" +
-          '<p class="da-blurb">' + esc(s.blurb) + "</p>" +
+          '<span class="da-state" style="' + pillStyle(s) + '">' + esc(s.label) + "</span>" +
+          '<p class="da-blurb">' + esc(blurb) + "</p>" +
         "</div>" +
       "</div>" +
       '<p class="da-window">' + (m.best
@@ -1827,7 +1935,12 @@ window.ALTAR_SETTINGS = {
           ? "Not today. Dries out <b>" + esc(whenLabel(m.recovery, m.current.time.slice(0, 10))) + "</b>"
           : m.now.score < 72
             ? "Not today, and nothing in the forecast brings it back this week."
-            : "No good window left today.") + "</p>" +
+            : m.dark
+              ? (m.next
+                  ? "Dark now. Best window tomorrow <b>" + fmtRange(m.next.from, m.next.to) + "</b>"
+                  : "Dark now. No good window tomorrow.")
+              : "No good window left today.") + "</p>" +
+      '<p class="da-src">' + srcHtml(m) + "</p>" +
       '<div class="da-trio">' + trio + "</div>" +
       '<p class="da-prime"><b>Prime</b>' + primeLine(sm3, m) + "</p>" +
       '<dl class="da-facts">' +
@@ -1883,23 +1996,64 @@ window.ALTAR_SETTINGS = {
     });
   }
 
+  /* Best score first (10 Nov 2026). Twenty cards in list order meant a
+     rider on a phone scrolled about sixteen screens comparing numbers
+     in their head. Ties keep the TRAILS order, a card with no score
+     yet sinks, and the DOM is only touched when the order really
+     changed. The nodes are MOVED, not rebuilt, so an open panel
+     survives — and `data-i` stays the TRAILS index, so anything that
+     needs a particular trail must look it up by that or by name, never
+     by position. Away cards live in their own grid and keep list order. */
+  function sortCards() {
+    var order = [];
+    TRAILS.forEach(function (t, i) { if (!t.away) order.push(i); });
+    var val = function (i) { return models[i] ? Math.round(models[i].now.score) : -1; };
+    order.sort(function (a, b) { return val(b) - val(a) || a - b; });
+    var same = true;
+    for (var k = 0; k < order.length; k++) {
+      if (grid.children[k] !== cards[order[k]]) { same = false; break; }
+    }
+    if (!same) order.forEach(function (i) { grid.appendChild(cards[i]); });
+  }
+
   function renderVerdict() {
-    var bestT = null;
+    sortCards();
+    var pool = [], allDark = true;
     TRAILS.forEach(function (t, i) {
       var m = models[i];
       /* the verdict answers "where do I ride today", so a four-hour
          drive doesn't get to win it even once it's loaded */
       if (!m || t.away) return;
-      if (!bestT || m.now.score > bestT.m.now.score) bestT = { t: t, m: m };
+      if (!m.dark) allDark = false;
+      pool.push({ t: t, m: m });
     });
-    if (!bestT) { verdictEl.hidden = true; return; }
-    var s = STATES[bestT.m.now.key];
+    if (!pool.length) { verdictEl.hidden = true; return; }
+
+    /* After dark "right now" is no use to anyone, so the verdict looks
+       at tomorrow's best window instead — but only when somewhere
+       actually has one; otherwise it stays on the current score. */
+    var night = allDark && pool.some(function (x) { return !!x.m.next; });
+    var val = function (x) {
+      return night ? (x.m.next ? Math.round(x.m.next.mean) : -1) : Math.round(x.m.now.score);
+    };
+    var top = -1;
+    pool.forEach(function (x) { if (val(x) > top) top = val(x); });
+    /* In a dry spell every card reads 100, and naming whichever trail
+       happens to be first in the list as the "best bet" was a coin
+       toss dressed up as advice. Three or more level at the top: say so. */
+    var tied = pool.filter(function (x) { return val(x) === top; });
+    var lead = tied[0];
+    var s = STATES[night ? lead.m.next.key : lead.m.now.key];
+    var win = night ? lead.m.next : lead.m.best;
+    var name = tied.length >= 3 ? "Take your pick"
+      : tied.map(function (x) { return x.t.name; }).join(" / ");
+    var sub = (tied.length >= 3 ? tied.length + " spots at " : "") + top + " · " + s.label +
+      (tied.length === 1 && win ? " · " + fmtRange(win.from, win.to) : "");
     verdictEl.hidden = false;
     verdictEl.innerHTML =
-      '<span class="k">Best bet right now</span>' +
-      '<span class="n" style="color:' + s.color + '">' + esc(bestT.t.name) + "</span>" +
-      '<span class="s">' + r0(bestT.m.now.score) + " &middot; " + esc(s.label) +
-      (bestT.m.best ? " &middot; " + fmtRange(bestT.m.best.from, bestT.m.best.to) : "") + "</span>";
+      '<span class="k">' + (night ? "Best bet tomorrow" : "Best bet right now") + "</span>" +
+      '<span class="n" style="color:' + inkOf(s) + '">' + esc(name) + "</span>" +
+      '<span class="s">' + esc(sub) + "</span>";
   }
 
   function stamp(at) {
@@ -1968,6 +2122,7 @@ window.ALTAR_SETTINGS = {
         /* Measured rain feeds the water balance, so it changes the score
            and not just the card. Any trail already built from forecast
            rain has to be rebuilt once the gauges land. */
+        WX_SETTLED = true;
         if (EXTRA.wx) {
           TRAILS.forEach(function (t, i) {
             var raw = rawStore[keyOf(t)];
@@ -1980,9 +2135,12 @@ window.ALTAR_SETTINGS = {
           renderVerdict();
         }
         applyExtra();
+        /* no gauges came back: the cards are not rebuilt, so their
+           "checking the gauges…" line has to be settled by hand */
+        refreshSrc();
         MEASURED_IN = true;
       })
-      .catch(function () { MEASURED_IN = true; });
+      .catch(function () { WX_SETTLED = true; refreshSrc(); MEASURED_IN = true; });
 
     var cached = force ? null : readCache();
     if (cached && cached.raw) {
@@ -2114,13 +2272,26 @@ window.ALTAR_SETTINGS = {
      abstract. Each submission carries the exact model inputs behind that
      score, so the set can be used to refit the soil and aspect multipliers.
 
-     Delivery is fire-and-forget: Apps Script web apps don't return CORS
-     headers, so the browser cannot read the response. Anything that fails
-     or is sent with no signal stays in a local queue and retries later.
-     Confirm delivery in the sheet, not in the browser.
+     Delivery is CONFIRMED since 10 Nov 2026. The old route was fire-and-
+     forget (written for Apps Script, which sent no CORS headers): it
+     told the rider "Logged" and emptied the queue the moment the browser
+     accepted the request, whether or not it ever arrived — so a rating
+     sent with no signal, or during a redeploy, was lost and nobody knew.
+     The Railway service answers with CORS headers and a 204, so the page
+     now waits for that answer and only then takes the rating off the
+     local queue. Anything unconfirmed stays queued and is retried on the
+     next page load and whenever the phone comes back online. The service
+     drops duplicates (reporter_id | sent_at | trail), so a retry of
+     something that did land is harmless.
      ============================================================ */
 
+  /* keyOf(trail) -> "sent" | "queued", for this page view */
   var RATED = {};
+  function ratedHtml(tkey) {
+    return RATED[tkey] === "sent"
+      ? '<p class="da-rate-msg ok">Logged — thanks. That one actually helps.</p>'
+      : '<p class="da-rate-msg ok">Saved on this phone. It\'ll send once you\'re back on signal.</p>';
+  }
 
   function reporter() {
     try {
@@ -2142,30 +2313,63 @@ window.ALTAR_SETTINGS = {
     try { window.localStorage.setItem(QUEUE_KEY, JSON.stringify(a.slice(-200))); } catch (e) {}
   }
 
+  /* Resolves true only once the service has answered. text/plain keeps
+     it a "simple" request (no preflight); keepalive lets it finish if
+     the rider leaves the page straight after tapping Send. A 400 means
+     the service could not read the batch — resending the same bytes
+     would fail forever and hold every later rating behind it, so that
+     counts as done too. */
   function transmit(payloads) {
-    if (!FEEDBACK.endpoint) return false;
-    var text = JSON.stringify(payloads);
+    if (!FEEDBACK.endpoint || !window.fetch) return Promise.resolve(false);
+    if (navigator.onLine === false) return Promise.resolve(false);
     try {
-      if (navigator.sendBeacon &&
-          navigator.sendBeacon(FEEDBACK.endpoint, new Blob([text], { type: "text/plain;charset=UTF-8" }))) {
-        return true;
-      }
-    } catch (e) {}
-    try {
-      fetch(FEEDBACK.endpoint, {
-        method: "POST", mode: "no-cors", keepalive: true,
+      return fetch(FEEDBACK.endpoint, {
+        method: "POST", keepalive: true,
         headers: { "Content-Type": "text/plain;charset=UTF-8" },
-        body: text
-      });
-      return true;
-    } catch (e) { return false; }
+        body: JSON.stringify(payloads)
+      }).then(function (r) { return r.ok || r.status === 400; })
+        .catch(function () { return false; });
+    } catch (e) { return Promise.resolve(false); }
   }
 
-  function flushQueue() {
+  /* Sends the queue in batches of 25 (a keepalive body is capped at
+     64 KB) and removes only what was confirmed, so a rating added while
+     a send is in flight is never wiped with it. */
+  function flushOnce() {
     var q = queueRead();
-    if (!q.length || !FEEDBACK.endpoint) return;
-    if (navigator.onLine === false) return;
-    if (transmit(q)) queueWrite([]);
+    if (!q.length) return Promise.resolve(true);
+    var batch = q.slice(0, 25), sent = {};
+    batch.forEach(function (p) { sent[JSON.stringify(p)] = true; });
+    return transmit(batch).then(function (ok) {
+      if (!ok) return false;
+      var now = queueRead();
+      var rest = now.filter(function (p) { return !sent[JSON.stringify(p)]; });
+      queueWrite(rest);
+      /* guard: if nothing came off the queue, stop rather than loop */
+      if (rest.length && rest.length < now.length) return flushOnce();
+      return rest.length === 0;
+    });
+  }
+  /* One flush at a time; a call made mid-flight runs after it. Resolves
+     true when the queue is empty and everything in it was confirmed. */
+  var flushChain = Promise.resolve();
+  function flushQueue() {
+    flushChain = flushChain.then(flushOnce, flushOnce).then(function (ok) {
+      /* Everything queued has now landed — including ratings saved
+         earlier with no signal, whose cards still say "Saved on this
+         phone". Tell them. */
+      if (ok) {
+        TRAILS.forEach(function (t, i) {
+          var k = keyOf(t);
+          if (RATED[k] !== "queued") return;
+          RATED[k] = "sent";
+          var live = cards[i] && cards[i].querySelector(".da-rate");
+          if (live) live.innerHTML = ratedHtml(k);
+        });
+      }
+      return ok;
+    });
+    return flushChain;
   }
 
   /* hoursBack: how long ago they rode. Every model field below is taken
@@ -2260,7 +2464,7 @@ window.ALTAR_SETTINGS = {
 
     var tkey = keyOf(t);
     if (RATED[tkey]) {
-      wrap.innerHTML = '<p class="da-rate-msg ok">Logged \u2014 thanks.</p>';
+      wrap.innerHTML = ratedHtml(tkey);
       return;
     }
 
@@ -2377,14 +2581,16 @@ window.ALTAR_SETTINGS = {
         var q = queueRead();
         q.push(payload);
         queueWrite(q);
-        RATED[tkey] = true;
+        RATED[tkey] = "queued";
+        wrap.innerHTML = '<p class="da-rate-msg" role="status">Sending\u2026</p>';
 
-        if (transmit(q)) {
-          queueWrite([]);
-          wrap.innerHTML = '<p class="da-rate-msg ok">Logged \u2014 thanks. That one actually helps.</p>';
-        } else {
-          wrap.innerHTML = '<p class="da-rate-msg ok">Saved. It\'ll send once you\'re back on signal.</p>';
-        }
+        flushQueue().then(function () {
+          /* The card may have been repainted while this was in flight
+             (the measured data landing, a Refresh), which replaces
+             `wrap` \u2014 so write to whichever rating block is there now. */
+          var live = body.querySelector(".da-rate");
+          if (live) live.innerHTML = ratedHtml(tkey);
+        });
       });
     });
   }

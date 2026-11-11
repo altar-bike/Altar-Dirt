@@ -266,6 +266,50 @@ Mechanics worth knowing before touching it:
   network calls, no new colours (the bands reuse the five STATES tier
   colours, so no new Sarah sign-off beyond the pending olive/bone one).
 
+### Page fixes, 10 Nov 2026 — none of them move a score
+
+Six changes from a page review. Anchors: `function sortCards`,
+`function srcHtml`, `function findWindow`, `function pillStyle`,
+`function flushOnce`, `#dirt-app [hidden]`.
+
+- **Cards sort best score first** (`sortCards()`, called from
+  `renderVerdict`). DOM position no longer identifies a trail — `data-i`
+  is still the `TRAILS` index, and both test files now look cards up by
+  it. Nodes are moved, not rebuilt. Away cards keep list order.
+- **The verdict admits a tie.** Three or more level at the top reads
+  "Take your pick · 20 spots at 100"; two are both named. Before, a dry
+  spell named whichever trail was first in `TRAILS`.
+- **After dark** (`m.dark`: no daylight hour left today) the card says
+  "Dark now. Best window tomorrow 8a–12p" from `m.next`, drops "Go now."
+  from the blurb, and the verdict becomes "Best bet tomorrow". `next`
+  uses tomorrow's own sunrise/sunset and whole lit hours only. Today's
+  window search (`findWindow`) is the old loop, unchanged.
+- **Rain source is on the card face** (`.da-src`): "measured 0.8 mi
+  away" / "area gauge, 5.5 mi off" (tier 2) / "forecast only — …". Same
+  six-gauge-hours test as the `rain` row. It reads "checking the
+  gauges…" until `/soil` settles (`WX_SETTLED`); `refreshSrc()` settles
+  it when no gauges come back.
+- **Wet and Slop are readable.** Their colours are 1.8:1 on the card, so
+  the label is a filled block with Ash text and the numbers use
+  `inkOf()`. Use `inkOf`/`pillStyle` wherever a state colour lands on
+  text; `STATES[k].color` is for fills. No new colours.
+- **Ratings are confirmed before they leave the queue.** `transmit()`
+  now waits for the service's answer (it sends CORS headers and a 204);
+  the old `sendBeacon` route said "Logged" and emptied the queue whether
+  or not anything arrived. Unconfirmed ratings stay queued and retry on
+  load and on `online`. The service's dedupe makes a double send safe.
+- **`#dirt-app [hidden]{display:none!important}`** — the away grid and
+  the verdict bar carried `hidden` but an `#dirt-app` display rule beat
+  the browser default, so four "Reading conditions…" shells showed
+  before the button was pressed. The smoke test now checks computed
+  `display`, not just the attribute.
+
+Checked by hand in a browser against live data and a doctored wet
+payload (sort order, both pill styles, day and night copy, a confirmed
+send, a failed send, the `online` retry). **The two Playwright tests
+were updated but not run** — no Playwright on the machine that made the
+change. Run them before trusting the next edit.
+
 ### `soil-review.html` — the corrections sheet
 
 The sheet Matt fills in to correct `soil` and `exposure`. It is **live**:

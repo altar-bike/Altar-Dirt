@@ -64,7 +64,10 @@ await p.route("**fonts.googleapis.com**",r=>r.fulfill({status:200,body:""}));
 await p.goto("file://"+process.cwd()+"/index.html",{waitUntil:"load"});
 await p.waitForTimeout(3500);
 
-const card = p.locator(".da-card").first();
+/* Bent Creek by its TRAILS index, not by position — the page sorts cards
+   best score first since 10 Nov 2026, so .first() is whichever trail is
+   riding best, and this fixture's wetness was tuned for Bent Creek's clay. */
+const card = p.locator('.da-card[data-i="0"]');
 await card.locator(".da-rate-open").click();
 await card.locator('[data-g="verdict"] .da-chip[data-v="-1"]').click();
 await card.locator('[data-g="ago"] .da-chip[data-h="8"]').click();
@@ -77,8 +80,15 @@ const nameBox = card.locator(".da-name");
 if (await nameBox.count()) await nameBox.fill("Test Rider");
 await card.locator(".da-rate-send").click();
 await p.waitForTimeout(900);
+/* Delivery is confirmed since 10 Nov 2026: "Logged" may only appear once
+   the service has answered, and only then does the rating leave the
+   local queue. The stub above answers 200, so both must be true here. */
+const sentMsg = (await card.locator(".da-rate-msg").textContent()) || "";
+const queueLeft = await p.evaluate(() => JSON.parse(localStorage.getItem("altar:dirt:queue") || "[]").length);
 await b.close();
 
+if(!/Logged/.test(sentMsg)) problems.push("a confirmed send should read Logged, got: "+sentMsg);
+if(queueLeft!==0) problems.push("queue should be empty after a confirmed send, has "+queueLeft);
 if(!posted) problems.push("nothing was POSTed");
 else {
   const r = Array.isArray(posted) ? posted[0] : (posted.items ? posted.items[0] : posted);

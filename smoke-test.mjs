@@ -111,12 +111,16 @@ await page.evaluate(() => document.querySelectorAll(".da-toggle").forEach((b) =>
 
 /* Out-of-state areas sit behind a button and must NOT have loaded yet. */
 const before = await page.evaluate(() => ({
+  awayDisplay: getComputedStyle(document.getElementById("da-away-grid")).display,
   awayHidden: document.getElementById("da-away-grid")?.hidden,
   awayBtn: !!document.getElementById("da-away-btn"),
   awayScored: [...document.querySelectorAll("#da-away-grid .da-score")].length,
   localScored: [...document.querySelectorAll("#da-grid .da-score")].length
 }));
 if (before.awayHidden !== true) problems.push("away grid should start hidden");
+/* The attribute was true all along while the grid was on screen — an
+   #dirt-app display rule outranked the browser's [hidden] default. */
+if (before.awayDisplay !== "none") problems.push("away grid has the hidden attribute but is still displayed");
 if (!before.awayBtn) problems.push("away load button missing");
 if (before.awayScored !== 0) problems.push("away trails fetched before being asked for");
 
@@ -133,7 +137,13 @@ if (after.awayBtn) problems.push("away button should be gone after loading");
 if (after.awayScored === 0) problems.push("away trails did not load on click");
 
 const r = await page.evaluate(() => {
-  const cards = [...document.querySelectorAll(".da-card")];
+  /* Cards are sorted best-score-first on the page since 10 Nov 2026, so
+     DOM position no longer says which trail a card is. `data-i` is still
+     the TRAILS index — put them back in list order before indexing, or
+     cards[0] / [1] / [5] below stop being Bent Creek, North Mills River
+     and Ride Kanuga. */
+  const cards = [...document.querySelectorAll(".da-card")]
+    .sort((a, b) => Number(a.getAttribute("data-i")) - Number(b.getAttribute("data-i")));
   const rowsOf = (c) => [...(c?.querySelectorAll(".da-measured-in li") || [])]
     .map((l) => l.textContent.replace(/\s+/g, " ").trim());
   return {
@@ -146,6 +156,11 @@ const r = await page.evaluate(() => {
     gaugesPerCard: cards.map((c) => c.querySelectorAll(".da-needle").length),
     ghostsPerCard: cards.map((c) => c.querySelectorAll(".da-ghost").length),
     primes: cards.map((c) => (c.querySelector(".da-prime")?.textContent || "").replace(/\s+/g, " ").trim()),
+    sources: cards.map((c) => (c.querySelector(".da-src")?.textContent || "").trim()),
+    /* what is actually on screen: the hidden attribute alone proved
+       nothing while an author display rule was overriding it */
+    awayShown: getComputedStyle(document.getElementById("da-away-grid")).display,
+    domOrderScores: [...document.querySelectorAll("#da-grid .da-card .da-score")].map((e) => Number(e.textContent)),
     stripLeftovers: document.querySelectorAll(".da-strip, .da-slot, .da-bar, .da-axis, .da-bracket").length,
     measured: rowsOf(cards[0]),
     meaning: cards[0]?.querySelector(".da-meaning")?.textContent.replace(/\s+/g, " ").trim() || null,
@@ -206,6 +221,18 @@ if (r.primes.some((p) => !p || !/prime/i.test(p)))
 const expectGhosts = hourOf(NOW) < 20 ? 3 : 0;
 if (r.ghostsPerCard.some((n) => n !== expectGhosts))
   problems.push("expected " + expectGhosts + " ghosts per dial trio, got [" + r.ghostsPerCard.join(",") + "]");
+
+/* Every card says where its rain came from, and by now the gauges have
+   landed: Bent Creek's is 0.25 mi off (measured), North Mills River's is
+   the same gauge at tier-2 range (area gauge). */
+if (r.sources.some((s) => !/^Rain:/.test(s))) problems.push("a card is missing its rain-source line");
+if (r.sources.some((s) => /checking/.test(s))) problems.push("a rain-source line never settled");
+if (!/measured/.test(r.sources[0])) problems.push("Bent Creek's rain-source line should say measured: " + r.sources[0]);
+if (!/area gauge/.test(r.sources[1])) problems.push("North Mills River's rain-source line should say area gauge: " + r.sources[1]);
+/* Local cards are laid out best score first. */
+if (r.domOrderScores.some((s, k) => k > 0 && s > r.domOrderScores[k - 1]))
+  problems.push("local cards are not sorted by score: [" + r.domOrderScores.join(",") + "]");
+if (r.awayShown === "none") problems.push("away grid still not displayed after loading");
 
 if (r.errors.length) problems.push("cards showing an error: " + r.errors[0]);
 /* 8 original local + 2 original away + 9 spots added 6 Aug 2026 + 2 new
