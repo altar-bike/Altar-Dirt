@@ -1605,6 +1605,100 @@ function scheduleKeepWarm() {
   setInterval(tick, 60 * 1000).unref?.();
 }
 
+/* ---------------- the trail page, mirrored ----------------
+   trails.altar.bike is a custom domain on THIS service, and until
+   10 Nov 2026 this service had nothing at "/" — so the address Matt
+   gives out answered "Not found" while the page sat on GitHub Pages.
+   Rather than move DNS again, the service hands out a copy of the page.
+
+   GitHub Pages stays the source: index.html is still published by a
+   push, exactly as before, and this fetches it from PAGE_URL and keeps
+   it in memory. A visitor always gets the copy in hand at once; when
+   that copy is older than PAGE_TTL it is refreshed behind them, so a
+   page change shows up here a few minutes after Pages has it. If
+   GitHub cannot be reached the last good copy keeps serving.
+
+   Never point PAGE_URL at this service's own domain — it would fetch
+   itself. servePage() refuses that case rather than loop. */
+const zlib = require("zlib");
+const PAGE_TTL = minutesOr(process.env.PAGE_TTL_MIN, 3);
+const pageCache = {};      // file -> { at, body, gz }
+const pageFlight = {};     // file -> the fetch in progress, so visitors share one
+
+/* Which mirrored file a path means, or null for everything else. Only
+   these two files exist; nothing here reads a path off the request. */
+function pageFileFor(pathname) {
+  if (pathname === "/" || pathname === "/index.html") return "index.html";
+  if (pathname === "/soil-review.html") return "soil-review.html";
+  return null;
+}
+
+function fetchPage(file) {
+  if (pageFlight[file]) return pageFlight[file];
+  pageFlight[file] = (async function () {
+    const ctl = new AbortController();
+    const timer = setTimeout(function () { ctl.abort(); }, 15000);
+    try {
+      const r = await fetch(new URL(file, PAGE_URL).toString(), {
+        headers: { "User-Agent": "AltarCycles-TrailConditions" }, signal: ctl.signal
+      });
+      if (!r.ok) throw new Error("GitHub Pages answered " + r.status);
+      const body = Buffer.from(await r.arrayBuffer());
+      /* Don't cache something that isn't the page — an error document
+         served with a 200, or a body cut short. */
+      if (file === "index.html" && body.indexOf('id="da-grid"') === -1) {
+        throw new Error("fetched page has no da-grid");
+      }
+      const fresh = !pageCache[file] || !pageCache[file].body.equals(body);
+      pageCache[file] = { at: Date.now(), body: body, gz: zlib.gzipSync(body) };
+      if (fresh) console.log("page mirror: " + file + " " + body.length + " bytes");
+    } catch (e) {
+      console.log("page mirror: " + file + " failed (" + (e && e.message || e) + ")" +
+        (pageCache[file] ? ", serving the last good copy" : ", nothing to serve"));
+      /* keep serving what we have, and wait a minute before asking again */
+      if (pageCache[file]) pageCache[file].at = Date.now() - PAGE_TTL + 60000;
+    } finally {
+      clearTimeout(timer);
+      delete pageFlight[file];
+    }
+    return pageCache[file] || null;
+  })();
+  return pageFlight[file];
+}
+
+function servePage(req, res, file) {
+  const bodyless = req.method === "HEAD";
+  const send = function (c) {
+    if (!c) {
+      res.writeHead(502, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      return res.end(bodyless ? undefined :
+        '<!doctype html><meta charset="utf-8"><title>Trail Conditions</title>' +
+        "<p>Couldn't load the page just now. Try <a href=\"" + PAGE_URL + '">' + PAGE_URL + "</a>.</p>");
+    }
+    const gz = /\bgzip\b/.test(String(req.headers["accept-encoding"] || ""));
+    const buf = gz ? c.gz : c.body;
+    const head = {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "public, max-age=60",
+      "Vary": "Accept-Encoding",
+      "Content-Length": buf.length
+    };
+    if (gz) head["Content-Encoding"] = "gzip";
+    res.writeHead(200, head);
+    res.end(bodyless ? undefined : buf);
+  };
+  let selfHost = false;
+  try { selfHost = new URL(PAGE_URL).host === String(req.headers.host || ""); } catch (e) {}
+  if (selfHost) return send(null);
+
+  const have = pageCache[file];
+  if (have) {
+    if (Date.now() - have.at > PAGE_TTL) fetchPage(file);   // refresh behind the visitor
+    return send(have);
+  }
+  fetchPage(file).then(send, function () { send(null); });
+}
+
 /* ------------------------- server ------------------------- */
 
 const server = http.createServer(function (req, res) {
@@ -1617,6 +1711,13 @@ const server = http.createServer(function (req, res) {
       "Access-Control-Allow-Headers": "Content-Type"
     });
     return res.end();
+  }
+
+  /* The page itself. GET and HEAD only — a POST to "/" is still a
+     rating, further down. */
+  if (req.method === "GET" || req.method === "HEAD") {
+    const pageFile = pageFileFor(url.pathname);
+    if (pageFile) return servePage(req, res, pageFile);
   }
 
   if (req.method === "GET" && url.pathname === "/health") {
@@ -1830,6 +1931,8 @@ server.listen(PORT, function () {
   console.log("clouds selectors: soil [" + CLOUDS_LOC + "] wx [" + CLOUDS_WX_LOC + "] coco [" + CLOUDS_COCO_LOC + "]");
   console.log(budgetLine());
   budgetLoggedMs = Date.now();
+  /* Have the page in hand before the first visitor asks for it. */
+  fetchPage("index.html");
 });
 
 /* Railway sends SIGTERM before it swaps a deploy in. Flush the store so

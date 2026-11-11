@@ -49,6 +49,7 @@ conditions page. Runs on Railway. `server.js` is the whole thing.
 
 | Method & path | What it does |
 |---|---|
+| `GET /` | The trail page itself — a copy of `index.html` fetched from GitHub Pages (`PAGE_URL`) and held in memory, refreshed every `PAGE_TTL_MIN` (default 3) behind the visitor. This is what `trails.altar.bike` shows. `/index.html` and `/soil-review.html` are served the same way. 502 with a link to the Pages address only if GitHub has never been reachable since boot. |
 | `POST /` | Store ratings. Body is a JSON array (the page sends `text/plain`). Returns 204. |
 | `GET /export.csv?token=…` | Full CSV export, deduplicated. 403 without the right token. |
 | `GET /health` | `{ ok: true, ratings: N }` — always 200 while the process is up. |

@@ -294,6 +294,22 @@ const unpackStore = lift("unpackStore");
   eq("the healthy sections beside them survive", partial.cocoCache, good.cocoCache);
 }
 
+/* ---------------------------------------------------------------
+   pageFileFor — which paths hand out the mirrored trail page. The
+   danger is a path that used to be an API route, or a 404, quietly
+   turning into the page: "/" and the two html files, nothing else.
+   --------------------------------------------------------------- */
+{
+  const pageFileFor = lift("pageFileFor");
+  eq("the front door and index.html are the page",
+    [pageFileFor("/"), pageFileFor("/index.html")], ["index.html", "index.html"]);
+  eq("the corrections sheet is mirrored too", pageFileFor("/soil-review.html"), "soil-review.html");
+  eq("API routes and unknown paths are not the page",
+    ["/soil", "/status", "/health", "/export.csv", "/grade", "/index.htm", "//", "/../index.html", ""]
+      .map(pageFileFor),
+    [null, null, null, null, null, null, null, null, null]);
+}
+
 if (problems.length) {
   console.error("FAIL\n\n" + problems.join("\n\n"));
   process.exit(1);
@@ -302,4 +318,4 @@ console.log("parsed " + (parsed ? parsed.length : 0) + " trails from index.html:
   (parsed || []).map((t) => t.name).join(", "));
 console.log("PASS — locVariants, parseTrails, normaliseMoisture, milesBetween, " +
   "wxFetchHours, hourKeyMs, mergeHours, pruneHoursBefore, parseWxHours, minutesOr, " +
-  "monthWindow, paceSpacingMs, proratedBudget, isQuotaError, failFloorMs, intOr, unpackStore");
+  "monthWindow, paceSpacingMs, proratedBudget, isQuotaError, failFloorMs, intOr, unpackStore, pageFileFor");

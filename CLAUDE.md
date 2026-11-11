@@ -29,7 +29,21 @@ me" (filter them), one is real (Matt, Bent Creek, 4 Aug).
 
 - **Repo:** `altar-bike/Altar-Dirt` (public — Pages requires it). A `.nojekyll`
   file at root is required; Jekyll chokes on the Liquid examples in this file.
-- **Live page:** https://altar-bike.github.io/Altar-Dirt/
+- **Live page:** https://altar-bike.github.io/Altar-Dirt/ — and, since
+  10 Nov 2026, **https://trails.altar.bike/**, which is the address to
+  give out. `trails.altar.bike` is a custom domain on the Railway
+  service (DNS lives in Google Cloud DNS, NOT Squarespace — the domain
+  uses custom nameservers), and the service hands out a copy of the page
+  at `/`: it fetches `index.html` from GitHub Pages (`PAGE_URL`), keeps
+  it in memory and refreshes it every 3 minutes (`PAGE_TTL_MIN`) behind
+  the visitor. **GitHub Pages is still the source and a push is still
+  how the page ships.** After a push, confirm on the github.io address
+  first; `trails.altar.bike` follows within a few minutes (the first
+  visitor after the TTL gets the old copy and triggers the refresh).
+  Railway's log prints `page mirror: index.html N bytes` when the copy
+  changes. Never set `PAGE_URL` to the service's own domain. The page
+  at `trails.altar.bike` now depends on Railway being up — a redeploy
+  is a ~20 second blip; the github.io address does not.
 - **Feedback service:** `feedback-api/` in this repo, deployed on Railway
   (project "pleasant-compassion", service "Altar-Dirt") at
   https://altar-dirt-production.up.railway.app/ — volume at `/data`, env vars
